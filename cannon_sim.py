@@ -55,6 +55,7 @@ class Npc:
     add_to_chunk(self, chunk[0], chunk[1])
 
     self.respawn_time = opts.get('respawn_time', 80) # 20 tick respawn time, will be dependent on monster
+    self.wander_range = opts.get('wander_range', 5) # No clue what the default is here
     self.respawn()
     self.times_died = 0
 
@@ -67,6 +68,8 @@ class Npc:
     self.respawn_time_remaining = None
     # Move to its respawn location
     self._coordinate = self.respawn_coordinate
+    # Reset destination tile, might be changed later in the tick
+    self.destination_tile = self.respawn_coordinate
 
   def die(self):
     self._is_dead = True
@@ -107,8 +110,29 @@ class Npc:
   def perform_move(self):
     if self.is_dead():
       return
-    # TODO: Move somewhere
-    pass
+    # TODO (v0): Pathing towards player
+    # TODO (v0): Retreating from player
+    # TODO (v0): This is definitely missing cases where there are things blocking
+
+    # TODO: Does dest tile change happen before or after movement?
+    should_pick_new_dest = random.randint(0, 7) == 0
+    if should_pick_new_dest:
+      self.destination_tile = (random.randint(-self.wander_range, self.wander_range) + self.respawn_coordinate[0], random.randint(-self.wander_range, self.wander_range) + self.respawn_coordinate[1])
+      print(f'Picked a new coord as dest {self.destination_tile}')
+    
+    # Moving to the destination
+    def get_delta(start_val, dest_val):
+      if start_val == dest_val:
+        return 0
+      elif start_val > dest_val:
+        return -1
+      else:
+        return 1
+
+    dx = get_delta(self.x, self.destination_tile[0])
+    dy = get_delta(self.y, self.destination_tile[1])
+    self._coordinate = (self.x + dx, self.y + dy)
+
 
   def perform_interact(self):
     if self.is_dead():
@@ -116,15 +140,17 @@ class Npc:
     # TODO: Target the player
     pass
 
+  @property
   def x(self):
     return self._x
 
+  @property
   def y(self):
     return self._y
 
   @property
   def coordinate(self):
-    return (self.x(), self.y())
+    return (self.x, self.y)
 
   @coordinate.setter
   def _coordinate(self, coord: Tuple[int, int]):
