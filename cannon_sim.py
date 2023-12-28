@@ -1,6 +1,7 @@
 import math
 import random
 from collections import defaultdict
+from typing import Tuple
 
 players = []
 npc = []
@@ -14,6 +15,9 @@ def euclidean(point1, point2):
 npc_chunk_lookup = defaultdict(lambda: defaultdict(dict))
 def get_npcs_in_chunk(chunk_x, chunk_y):
   return npc_chunk_lookup[chunk_x][chunk_y].values()
+
+def get_living_npcs_in_chunk(chunk_x, chunk_y):
+  return [n for n in npc_chunk_lookup[chunk_x][chunk_y].values() if n.is_dead() is False]
 
 def add_to_chunk(npc, chunk_x, chunk_y):
   npc_chunk_lookup[chunk_x][chunk_y][npc.slot_index] = npc
@@ -40,17 +44,45 @@ class Action:
 
 class Npc:
 
-  def __init__(self, x: int, y: int, hitpoints: int):
-    self.hitpoints = hitpoints
+  def __init__(self, x: int, y: int, max_hitpoints: int, opts={}):
+    self.max_hitpoints = max_hitpoints
     self.queue = []
     self.slot_index = next_slot() # This should eventually be passed in
     self._x = x
     self._y = y
+    self.respawn_coordinate = (x, y)
     chunk = get_chunk(x, y)
     add_to_chunk(self, chunk[0], chunk[1])
 
+    self.respawn_time = opts.get('respawn_time', 80) # 20 tick respawn time, will be dependent on monster
+    self.respawn()
+    self.times_died = 0
+
   def is_dead(self):
-    return self.hitpoints <= 0
+    return self._is_dead
+
+  def respawn(self):
+    self._is_dead = False
+    self.hitpoints = self.max_hitpoints
+    self.respawn_time_remaining = None
+    # Move to its respawn location
+    self._coordinate = self.respawn_coordinate
+
+  def die(self):
+    self._is_dead = True
+    self.hitpoints = 0
+    self.respawn_time_remaining = self.respawn_time
+    # TODO: Does the queue actually get cleared on death? Is there a death queue? Do we care here?
+    self.queue = []
+    self.times_died += 1
+
+
+  def perform_timers(self):
+    # Respawn timer
+    if self.is_dead():
+      self.respawn_time_remaining -= 1
+      if self.respawn_time_remaining == 0:
+        self.respawn()
 
   def add_to_queue(self, action: Action):
     self.queue.append(action)
@@ -58,15 +90,18 @@ class Npc:
   def perform_queue(self):
     new_queue = []
     for action in self.queue:
+      # If action causes the npc to die, the queue will clear and we need to break
       action.act_on(self)
-      # TODO: Does the queue actually get cleared on death?
       if self.is_dead():
         break
     self.queue = new_queue
 
   def take_damage(self, amount):
-    print(f'Taking {amount} damage')
-    self.hitpoints -= amount
+    damage_taken = min(amount, self.hitpoints)
+    self.hitpoints -= damage_taken
+    print(f'Took {damage_taken} damage (hit a {amount})')
+    if self.hitpoints <= 0:
+      self.die()
     print(f'Hitpoints remaining: {self.hitpoints}')
 
   def perform_move(self):
@@ -87,17 +122,19 @@ class Npc:
   def y(self):
     return self._y
 
-  def coordinate(self, x, y):
+  @property
+  def coordinate(self):
+    return (self.x(), self.y())
+
+  @coordinate.setter
+  def _coordinate(self, coord: Tuple[int, int]):
     old_chunk = get_chunk(self._x, self._y)
-    new_chunk = get_chunk(x, y)
+    new_chunk = get_chunk(coord[0], coord[1])
     if new_chunk != old_chunk:
       remove_from_chunk(self, old_chunk[0], old_chunk[1])
       add_to_chunk(self, new_chunk[0], new_chunk[1])
-    self._x = x
-    self._y = y
-
-  def coordinate(self):
-    return (self.x(), self.y())
+    self._x = coord[0]
+    self._y = coord[1]
 
 class DamageAction(Action):
   def __init__(self, damage):
@@ -154,11 +191,11 @@ class Cannon:
         for x_chunk_offset in [1, 0, -1]:
             for y_chunk_offset in [1, 0, -1]:
                 chunk = (center_chunk[0] + x_chunk_offset, center_chunk[1] + y_chunk_offset)
-                for npc in get_npcs_in_chunk(chunk[0], chunk[1]):
-                    if cheb(center, npc.coordinate()) <= cannon_ranges[i]:
+                for npc in get_living_npcs_in_chunk(chunk[0], chunk[1]):
+                    if cheb(center, npc.coordinate) <= cannon_ranges[i]:
                         npcs_in_range.append(npc)
 
-        npcs_in_range.sort(key=lambda x: euclidean(center, npc.coordinate()))
+        npcs_in_range.sort(key=lambda x: euclidean(center, npc.coordinate))
 
         if len(npcs_in_range) > 0:
             return npcs_in_range[0]
@@ -179,7 +216,7 @@ class Player:
   def cannon(self):
     return self._cannon
 
-npcs = [Npc(2, 0, 100)]
+npcs = [Npc(2, 0, 100), Npc(2, 0, 100)]
 player = Player()
 player.place_cannon(0, 0)
 players = [player]
@@ -188,7 +225,7 @@ def perform_tick():
   for npc in npcs:
     # Each npc do
     #   stalls end
-    #   timers (poison?)
+    npc.perform_timers()
     #   * queue (take damage)
     npc.perform_queue()
     #   interaction with items/objects
@@ -210,9 +247,9 @@ def perform_tick():
     #   * (not v0) interaction with players/npcs
 
 tick_num = 0
-while True:
+while tick_num < 200:
   print(f'{tick_num}')
   perform_tick()
-  if npcs[0].is_dead():
-    break
   tick_num += 1
+for npc in npcs:
+  print(npc.times_died)
