@@ -1,4 +1,4 @@
-# Henke's model
+import random
 
 players = []
 npc = []
@@ -58,7 +58,14 @@ class Cannon:
   def __init__(self, x: int, y: int):
     self._x = x
     self._y = y
-    self.direction = (0, 0)
+    # X, Y (positive is right and up resp.)
+    self.direction = (0, 1)
+
+    self.MOVEMENTS = {
+      0: {1: (1, 1), -1: (-1, -1)},
+      1: {1: (1, 0), -1: (0, -1)},
+      -1: {1: (0, 1), -1: (-1, 0)},
+    }
 
   def process_tick(self):
     print('Processing cannon tick')
@@ -66,7 +73,8 @@ class Cannon:
     self.turn()
 
   def turn(self):
-    pass
+    # Definitely some way to not hardcode but I can't be bothered
+    self.direction = self.MOVEMENTS[self._x][self._y]
 
   def fire(self):
     # TODO: Somehow pick an npc
@@ -74,7 +82,7 @@ class Cannon:
     self.queue_damage(npc)
 
   def queue_damage(self, npc: Npc):
-    damage = 10
+    damage = random.randint(0, 25)
     npc.add_to_queue(DamageAction(damage))
 
 class Player:
