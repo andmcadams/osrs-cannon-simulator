@@ -152,10 +152,6 @@ class Npc:
   def perform_move(self):
     if self.is_dead():
       return
-    # TODO (v0): Pathing towards player
-    # TODO (v0): Retreating from player
-    # TODO (v0): This is definitely missing cases where there are things blocking
-
     # TODO: Does dest tile change happen before or after movement? Seems to be before based on gech message
 
     # Choose dest tile based on strategy
@@ -164,8 +160,7 @@ class Npc:
     if self.mode == NpcMode.PLAYERESCAPE:
       self.retreat()
     if self.mode == NpcMode.PLAYERFOLLOW:
-      # TODO: Create follow code
-      self.wander()
+      self.follow()
     # Move
     self.move()
 
@@ -193,6 +188,39 @@ class Npc:
     if should_pick_new_dest:
       self.destination_tile = (random.randint(-self.wanderrange, self.wanderrange) + self.respawn_coordinate[0], random.randint(-self.wanderrange, self.wanderrange) + self.respawn_coordinate[1])
       debug(f'NPC {self.slot_index} picked a new coord as dest {self.destination_tile} while wandering')
+
+  def follow(self):
+    # Assumes the destination tile is one of the ones next to the player
+    x = self.interacting_with.x
+    y = self.interacting_with.y
+    north_tile = (x, y+1)
+    south_tile = (x, y-1)
+    east_tile = (x+1, y)
+    west_tile = (x-1, y)
+
+    # If they are the same coordinate, choose a random tile
+    if cheb(self.interacting_with.coordinate, self.coordinate) == 0:
+      direction = 1 if random.random() < 0.5 else -1
+      if random.random() < 0.5:
+        (x+direction, y)
+      else:
+        (x, y+direction)
+
+    north_tile_distance = cheb(north_tile, self.coordinate)
+    south_tile_distance = cheb(south_tile, self.coordinate)
+    east_tile_distance = cheb(east_tile, self.coordinate)
+    west_tile_distance = cheb(west_tile, self.coordinate)
+    
+    min_dist = min(north_tile_distance, south_tile_distance, east_tile_distance, west_tile_distance)
+    # Order of checks here is important since an Npc on the NE/NW tile will path to the N tile and SE/SW paths S
+    if min_dist == north_tile_distance:
+      self.destination_tile = north_tile
+    elif min_dist == south_tile_distance:
+      self.destination_tile = south_tile
+    elif min_dist == east_tile_distance:
+      self.destination_tile = east_tile
+    else:
+      self.destination_tile = west_tile
 
   def move(self):
     # Moving to the destination
@@ -317,8 +345,8 @@ class Cannon:
 class Player:
   def __init__(self):
     self._cannon = None
-    self._x = -19
-    self._y = -19
+    self._x = 0
+    self._y = 0
 
   def perform_timers(self):
     if self.cannon():
