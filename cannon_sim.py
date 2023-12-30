@@ -34,12 +34,12 @@ def remove_from_chunk(npc, chunk_x, chunk_y):
 def get_chunk(x, y):
   return (x // 8, y // 8)
 
-def is_walkable_tile(x, y):
+def is_walkable_tile(old_coord, new_coord):
   # Not walkable if there is an object or npc there
   # TODO: Check for objects
   for npc in npcs:
     # TODO: Allow if the transparent flag is set
-    if npc.coordinate == (x, y):
+    if npc.coordinate == (new_coord[0], new_coord[1]):
       return False
 
   return True
@@ -246,13 +246,13 @@ class Npc:
 
     new_coordinate = None
     # Attempt to move to the destination tile
-    if is_walkable_tile(self.x + dx, self.y + dy):
+    if is_walkable_tile(self.coordinate, (self.x + dx, self.y + dy)):
       new_coordinate = (self.x + dx, self.y + dy)
     elif dx != 0 and dy != 0:
       # If we were trying to go diagonally, but cant, try E/W followed by N/S
-      if is_walkable_tile(self.x + dx, self.y):
+      if is_walkable_tile(self.coordinate, (self.x + dx, self.y)):
         new_coordinate =  (self.x + dx, self.y)
-      elif is_walkable_tile(self.x, self.y + dy):
+      elif is_walkable_tile(self.coordinate, (self.x, self.y + dy)):
         new_coordinate =  (self.x, self.y + dy)
 
     if new_coordinate:
