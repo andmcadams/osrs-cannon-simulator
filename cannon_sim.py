@@ -2,9 +2,15 @@ import math
 import random
 from collections import defaultdict
 from typing import Tuple
+from enum import Enum
 
 players = []
 npc = []
+
+DEBUG = True
+def debug(msg):
+  if DEBUG == True:
+    print(msg)
 
 def cheb(point1, point2):
   return max(abs(point1[0] - point2[0]), abs(point1[1] - point2[1]))
@@ -28,6 +34,9 @@ def remove_from_chunk(npc, chunk_x, chunk_y):
 def get_chunk(x, y):
   return (x // 8, y // 8)
 
+def is_walkable_tile(x, y):
+  return True
+
 def next_slot_func():
   count = 0
   def inner():
@@ -42,6 +51,14 @@ class Action:
   def act_on(self, entity):
     raise NotImplementedError
 
+class NpcMode(Enum):
+  WANDER = 1
+  PATROL = 2
+  PLAYERESCAPE = 3
+  PLAYERFOLLOW = 4
+  PLAYERFACE = 5
+  PLAYERFACECLOSE = 6
+
 class Npc:
 
   def __init__(self, x: int, y: int, max_hitpoints: int, opts={}):
@@ -55,7 +72,9 @@ class Npc:
     add_to_chunk(self, chunk[0], chunk[1])
 
     self.respawn_time = opts.get('respawn_time', 80) # 20 tick respawn time, will be dependent on monster
-    self.wander_range = opts.get('wander_range', 5) # No clue what the default is here
+    self.wanderrange = opts.get('wanderrange', 5) # No clue what the default is here
+    self.maxrange = opts.get('maxrange', 8) # No clue what the default is here
+    self.set_interaction(None)
     self.respawn()
     self.times_died = 0
 
@@ -70,6 +89,7 @@ class Npc:
     self._coordinate = self.respawn_coordinate
     # Reset destination tile, might be changed later in the tick
     self.destination_tile = self.respawn_coordinate
+    self._mode = NpcMode.WANDER
 
   def die(self):
     self._is_dead = True
@@ -78,7 +98,7 @@ class Npc:
     # TODO: Does the queue actually get cleared on death? Is there a death queue? Do we care here?
     self.queue = []
     self.times_died += 1
-
+    self.set_interaction(None)
 
   def perform_timers(self):
     # Respawn timer
@@ -99,13 +119,35 @@ class Npc:
         break
     self.queue = new_queue
 
-  def take_damage(self, amount):
+  def take_damage(self, amount, attacker):
     damage_taken = min(amount, self.hitpoints)
     self.hitpoints -= damage_taken
-    print(f'Took {damage_taken} damage (hit a {amount})')
+    if self.interacting_with is None:
+      self.set_interaction(attacker)
+    if abs(attacker.x - self.x) >= self.maxrange or abs(attacker.y - self.y) >= self.maxrange:
+      self.mode = NpcMode.PLAYERESCAPE
+    else:
+      self.mode = NpcMode.PLAYERFOLLOW
+
+    debug(f'Npc {self.slot_index} took {damage_taken} damage (hit a {amount})')
     if self.hitpoints <= 0:
       self.die()
-    print(f'Hitpoints remaining: {self.hitpoints}')
+    debug(f'Npc {self.slot_index} hitpoints remaining: {self.hitpoints}')
+  
+  def set_interaction(self, entity):
+    if entity:
+      debug(f'Npc {self.slot_index} interacting with new entity {entity}')
+    self.interacting_with = entity
+
+  @property
+  def mode(self):
+    return self._mode
+
+  @mode.setter
+  def mode(self, mode):
+    if mode != self._mode:
+      debug(f'Npc {self.slot_index} mode changed to {mode.name}')
+    self._mode = mode
 
   def perform_move(self):
     if self.is_dead():
@@ -114,12 +156,45 @@ class Npc:
     # TODO (v0): Retreating from player
     # TODO (v0): This is definitely missing cases where there are things blocking
 
-    # TODO: Does dest tile change happen before or after movement?
+    # TODO: Does dest tile change happen before or after movement? Seems to be before based on gech message
+
+    # Choose dest tile based on strategy
+    if self.mode == NpcMode.WANDER:
+      self.wander()
+    if self.mode == NpcMode.PLAYERESCAPE:
+      self.retreat()
+    if self.mode == NpcMode.PLAYERFOLLOW:
+      # TODO: Create follow code
+      self.wander()
+    # Move
+    self.move()
+
+  def retreat(self):
+    # Set dest tile to one of the maxrange corners based on relative location to player
+    player = self.interacting_with
+    distance_x = self.x - player.x # If positive, npc is to the EAST
+    distance_y = self.y - player.y # If positive, npc is to the NORTH
+
+    # Else cases have been confirmed here
+    if distance_x > 0: # PLAYER IS WEST
+      if distance_y > 0: # PLAYER IS SOUTH
+        delta = (self.maxrange, self.maxrange) # NORTH EAST CORNER
+      else: # PLAYER IS NORTH/EVEN
+        delta = (self.maxrange, -self.maxrange) # SOUTH EAST CORNER
+    else: # PLAYER IS EAST/EVEN
+      if distance_y > 0: # PLAYER IS SOUTH
+        delta = (-self.maxrange, self.maxrange) # NORTH WEST CORNER
+      else: # PLAYER IS NORTH/EVEN
+        delta = (-self.maxrange, -self.maxrange) # SOUTH WEST CORNER
+    self.destination_tile = (self.respawn_coordinate[0] + delta[0], self.respawn_coordinate[1] + delta[1])
+
+  def wander(self):
     should_pick_new_dest = random.randint(0, 7) == 0
     if should_pick_new_dest:
-      self.destination_tile = (random.randint(-self.wander_range, self.wander_range) + self.respawn_coordinate[0], random.randint(-self.wander_range, self.wander_range) + self.respawn_coordinate[1])
-      print(f'Picked a new coord as dest {self.destination_tile}')
-    
+      self.destination_tile = (random.randint(-self.wanderrange, self.wanderrange) + self.respawn_coordinate[0], random.randint(-self.wanderrange, self.wanderrange) + self.respawn_coordinate[1])
+      debug(f'NPC {self.slot_index} picked a new coord as dest {self.destination_tile} while wandering')
+
+  def move(self):
     # Moving to the destination
     def get_delta(start_val, dest_val):
       if start_val == dest_val:
@@ -128,11 +203,28 @@ class Npc:
         return -1
       else:
         return 1
-
     dx = get_delta(self.x, self.destination_tile[0])
     dy = get_delta(self.y, self.destination_tile[1])
-    self._coordinate = (self.x + dx, self.y + dy)
+    
+    if dx == 0 and dy == 0:
+      debug(f'Npc {self.slot_index} is at destination tile already')
+      return
 
+    new_coordinate = None
+    # Attempt to move to the destination tile
+    if is_walkable_tile(self.x + dx, self.y + dy):
+      new_coordinate = (self.x + dx, self.y + dy)
+    elif dx != 0 and dy != 0:
+      # If we were trying to go diagonally, but cant, try E/W followed by N/S
+      if is_walkable_tile(self.x + dx, self.y):
+        new_coordinate =  (self.x + dx, self.y)
+      elif is_walkable_tile(self.x, self.y + dy):
+        new_coordinate =  (self.x, self.y + dy)
+
+    if new_coordinate:
+      self._coordinate = new_coordinate
+    else:
+      debug(f'Npc {self.slot_index} is stuck!')
 
   def perform_interact(self):
     if self.is_dead():
@@ -162,18 +254,12 @@ class Npc:
     self._x = coord[0]
     self._y = coord[1]
 
-class DamageAction(Action):
-  def __init__(self, damage):
-    self.damage = damage
-
-  def act_on(self, npc: Npc):
-    npc.take_damage(self.damage)
-
 class Cannon:
 
-  def __init__(self, x: int, y: int):
+  def __init__(self, x: int, y: int, player: 'Player'):
     self._x = x
     self._y = y
+    self.player = player
     # X, Y (positive is right and up resp.)
     self.direction = (0, 1)
 
@@ -198,7 +284,7 @@ class Cannon:
 
   def queue_damage(self, npc: Npc):
     damage = random.randint(0, 25)
-    npc.add_to_queue(DamageAction(damage))
+    npc.add_to_queue(DamageAction(damage, self.player))
   
   def get_target(self):
     origin = (self._x, self._y)
@@ -231,18 +317,38 @@ class Cannon:
 class Player:
   def __init__(self):
     self._cannon = None
+    self._x = -19
+    self._y = -19
 
   def perform_timers(self):
     if self.cannon():
       self.cannon().process_tick()
 
   def place_cannon(self, x: int, y: int):
-    self._cannon = Cannon(x, y)
+    self._cannon = Cannon(x, y, self)
 
   def cannon(self):
     return self._cannon
 
-npcs = [Npc(2, 0, 100), Npc(2, 0, 100)]
+  @property
+  def coordinate(self):
+    return (self.x, self.y)
+  
+  @coordinate.setter
+  def coordinate(self, new_coordinate):
+    self._x = new_coordinate[0]
+    self._y = new_coordinate[1]
+
+  @property
+  def x(self):
+    return self._x
+
+  @property
+  def y(self):
+    return self._y
+
+
+npcs = [Npc(0, -4, 100), Npc(0, -4, 100)]
 player = Player()
 player.place_cannon(0, 0)
 players = [player]
@@ -272,10 +378,18 @@ def perform_tick():
     #   * (not v0) movement
     #   * (not v0) interaction with players/npcs
 
+class DamageAction(Action):
+  def __init__(self, damage: int, attacker: Player):
+    self.damage = damage
+    self.attacker = attacker
+
+  def act_on(self, npc: Npc):
+    npc.take_damage(self.damage, self.attacker)
+
 tick_num = 0
 while tick_num < 200:
-  print(f'{tick_num}')
+  debug(f'{tick_num}')
   perform_tick()
   tick_num += 1
 for npc in npcs:
-  print(npc.times_died)
+  debug(f'Npc {npc.slot_index} died {npc.times_died} times')
