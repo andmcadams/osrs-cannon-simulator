@@ -5,7 +5,7 @@ from typing import Tuple
 from enum import Enum
 
 players = []
-npc = []
+npcs = []
 
 DEBUG = True
 def debug(msg):
@@ -35,6 +35,13 @@ def get_chunk(x, y):
   return (x // 8, y // 8)
 
 def is_walkable_tile(x, y):
+  # Not walkable if there is an object or npc there
+  # TODO: Check for objects
+  for npc in npcs:
+    # TODO: Allow if the transparent flag is set
+    if npc.coordinate == (x, y):
+      return False
+
   return True
 
 def next_slot_func():
@@ -88,7 +95,7 @@ class Npc:
     # Move to its respawn location
     self._coordinate = self.respawn_coordinate
     # Reset destination tile, might be changed later in the tick
-    self.destination_tile = self.respawn_coordinate
+    self._destination_tile = self.respawn_coordinate
     self._mode = NpcMode.WANDER
 
   def die(self):
@@ -187,7 +194,6 @@ class Npc:
     should_pick_new_dest = random.randint(0, 7) == 0
     if should_pick_new_dest:
       self.destination_tile = (random.randint(-self.wanderrange, self.wanderrange) + self.respawn_coordinate[0], random.randint(-self.wanderrange, self.wanderrange) + self.respawn_coordinate[1])
-      debug(f'NPC {self.slot_index} picked a new coord as dest {self.destination_tile} while wandering')
 
   def follow(self):
     # Assumes the destination tile is one of the ones next to the player
@@ -281,6 +287,16 @@ class Npc:
       add_to_chunk(self, new_chunk[0], new_chunk[1])
     self._x = coord[0]
     self._y = coord[1]
+
+  @property
+  def destination_tile(self):
+    return self._destination_tile
+
+  @destination_tile.setter
+  def destination_tile(self, coord: Tuple[int, int] | None):
+    if coord != self._destination_tile:
+      debug(f'NPC {self.slot_index} picked a new coord as dest {coord} while in mode {self.mode.name}')
+      self._destination_tile = coord
 
 class Cannon:
 
