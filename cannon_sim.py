@@ -333,6 +333,7 @@ class Cannon:
   def get_target(self):
     origin = (self._x, self._y)
     direction = self.direction
+    # Cook code ahead
     ordinal_cannon_distances = [2, 5, 12]
     cardinal_cannon_distances = [3, 7, 14]
     cannon_ranges = [1, 2, 5]
@@ -351,7 +352,7 @@ class Cannon:
                     if cheb(center, npc.coordinate) <= cannon_ranges[i]:
                         npcs_in_range.append(npc)
 
-        npcs_in_range.sort(key=lambda x: euclidean(center, npc.coordinate))
+        npcs_in_range.sort(key=lambda npc: euclidean(center, npc.coordinate))
 
         if len(npcs_in_range) > 0:
             return npcs_in_range[0]
