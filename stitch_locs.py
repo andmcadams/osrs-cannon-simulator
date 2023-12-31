@@ -8,6 +8,14 @@ from collections import defaultdict
 locations_config = json.load(open('./out/data_osrs/location_configs.json', 'r'))
 id_to_loc_config_map = {}
 for config in locations_config:
+  if 'unknown_17' in config:
+     config['blocks_projectile'] = False
+     config.pop('unknown_17')
+  if 'unknown_18' in config:
+     config['blocks_projectile'] = False
+     config.pop('unknown_18')
+  if 'unknown_19' in config:
+     config['is_door'] = config.pop('unknown_19')
   id_to_loc_config_map[config['id']] = config
 
 # Free mem
