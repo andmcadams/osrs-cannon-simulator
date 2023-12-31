@@ -1,24 +1,13 @@
 import math
 import random
-from collections import defaultdict
+from create_map import Mask, create_map_config
 from typing import Tuple
-from enum import Enum
-from create_map import create_map_config, LOC_ID_TO_CONFIG_MAP, relevant_npcs, Mask
-
-players = []
-npcs = []
-world_map = {}
+from create_map import relevant_npcs
 
 DEBUG = False
 def debug(msg):
   if DEBUG == True:
     print(msg)
-
-def get_npc_stats(npc_struct):
-  npc_id = npc_struct['id']
-  if npc_id in [3269, 11942, 11943, 11944, 3270, 11945, 3271, 11946, 11947, 3273, 3274]:
-    return {'id': npc_id, 'max_range': 4, 'wander_range': 2, 'hitpoints': 22, 'combat_level': 10, 'name': 'Guard'}
-  return {'id': npc_id}
 
 def cheb(point1, point2):
   return max(abs(point1[0] - point2[0]), abs(point1[1] - point2[1]))
@@ -26,78 +15,150 @@ def cheb(point1, point2):
 def euclidean(point1, point2):
   return math.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
 
-npc_chunk_lookup = defaultdict(lambda: defaultdict(dict))
-def get_npcs_in_chunk(chunk_x, chunk_y):
-  return npc_chunk_lookup[chunk_x][chunk_y].values()
 
-def get_living_npcs_in_chunk(chunk_x, chunk_y):
-  return [n for n in npc_chunk_lookup[chunk_x][chunk_y].values() if n.is_dead() is False]
+class Engine:
+  def __init__(self, map_registry, npc_registry, player_registry) -> None:
+    self.map_registry = map_registry
+    self.npc_registry = npc_registry
+    self.player_registry = player_registry
+    pass
 
-def get_living_npcs_in_chunk_by_abs_coordinate(coordinate):
-  chunk = get_chunk(coordinate[0], coordinate[1])
-  return get_living_npcs_in_chunk(chunk[0], chunk[1])
+  def perform_ticks(self, ticks):
+    for _ in range(ticks):
+      self.perform_tick()
 
-def add_to_chunk(npc, chunk_x, chunk_y):
-  npc_chunk_lookup[chunk_x][chunk_y][npc.slot_index] = npc
+  def perform_tick(self):
+    # Process client input
+    for npc in self.npc_registry.registered_npcs:
+      # Each npc do
+      #   stalls end
+      npc.perform_timers()
+      #   * queue (take damage)
+      npc.perform_queue()
+      #   interaction with items/objects
+      #   * movement
+      npc.perform_move()
+      #   * interaction with players/npcs (determine pathing the next tick?)
+      npc.perform_interact()
 
-def remove_from_chunk(npc, chunk_x, chunk_y):
-  npc_chunk_lookup[chunk_x][chunk_y].pop(npc.slot_index, None)
-
-def get_chunk(x, y):
-  return (x // 8, y // 8)
-
-def is_walkable_tile(old_coord, new_coord):
-  # Not walkable if there is an npc there or object that restricts movement
-  for npc in get_living_npcs_in_chunk_by_abs_coordinate(new_coord):
-    # TODO: Allow if the transparent flag is set
-    if npc.coordinate == (new_coord[0], new_coord[1]):
-      return False
-
-  # Get the object at new_coord
-  objs_on_coord = world_map[new_coord[0]][new_coord[1]]
-  if objs_on_coord:
-    for loc in objs_on_coord:
-      debug('Would have bumped into an object!')
-      direction_x = new_coord[0] - old_coord[0]
-      direction_y = new_coord[1] - old_coord[1]
-      blockers = loc.get('blockers', 0)
-      if blockers == 0:
-        continue
-
-      # Moving E
-      if direction_x == 1:
-        if loc['blockers'] & Mask.LEFT:
-          return False
-      # Moving W
-      if direction_x == -1:
-        if loc['blockers'] & Mask.RIGHT:
-          return False
-      # Moving N
-      if direction_y == 1:
-        if loc['blockers'] & Mask.BOTTOM:
-          return False
-      # Moving S
-      if direction_y == -1:
-        if loc['blockers'] & Mask.TOP:
-          return False
-
-
-  return True
-
-def next_slot_func():
-  count = 0
-  def inner():
-    nonlocal count
-    count += 1
-    return count
-  return inner
-next_slot = next_slot_func()
-
+    # Does this matter at all for a v0? prob not
+    for player in self.player_registry.registered_players:
+      # Each player do
+      #   stalls end
+      #   queue (take damage)
+      #   timers (poison?)
+      player.perform_timers() # This fires the cannon
+      #   area queue
+      #   interaction with items/objects
+      #   * (not v0) movement
+      #   * (not v0) interaction with players/npcs
 
 class Action:
   def act_on(self, entity):
     raise NotImplementedError
 
+class DamageAction(Action):
+  def __init__(self, damage: int, attacker: 'Player'):
+    self.damage = damage
+    self.attacker = attacker
+
+  def act_on(self, npc: 'Npc'):
+    npc.take_damage(self.damage, self.attacker)
+
+class WalkabilityStrategy:
+  def __init__(self, map_registry, npc_registry, player_registry) -> None:
+    self.map_registry = map_registry
+    self.npc_registry = npc_registry
+    self.player_registry = player_registry
+
+  def is_walkable_tile(self, old_coord, new_coord):
+    raise NotImplementedError
+
+class SimpleWalkabilityStrategy(WalkabilityStrategy):
+  def is_walkable_tile(self, old_coord, new_coord):
+    # Not walkable if there is an npc there or object that restricts movement
+    for npc in self.npc_registry.get_living_npcs_in_chunk_by_abs_coordinate(new_coord):
+      # TODO: Allow if the transparent flag is set
+      if npc.coordinate == (new_coord[0], new_coord[1]):
+        return False
+
+    # Get the object at new_coord
+    # objs_on_coord = world_map[new_coord[0]][new_coord[1]]
+    objs_on_coord = self.map_registry.get_objs(new_coord)
+    if objs_on_coord:
+      for loc in objs_on_coord:
+        debug('Would have bumped into an object!')
+        direction_x = new_coord[0] - old_coord[0]
+        direction_y = new_coord[1] - old_coord[1]
+        blockers = loc.get('blockers', 0)
+        if blockers == 0:
+          continue
+
+        # Moving E
+        if direction_x == 1:
+          if loc['blockers'] & Mask.LEFT:
+            return False
+        # Moving W
+        if direction_x == -1:
+          if loc['blockers'] & Mask.RIGHT:
+            return False
+        # Moving N
+        if direction_y == 1:
+          if loc['blockers'] & Mask.BOTTOM:
+            return False
+        # Moving S
+        if direction_y == -1:
+          if loc['blockers'] & Mask.TOP:
+            return False
+    return True
+
+from collections import defaultdict
+class NpcRegistry:
+  def __init__(self) -> None:
+    self._npcs = []
+    self.current_slot = 0
+    self.npc_chunk_lookup = defaultdict(lambda: defaultdict(dict))
+
+  @property
+  def registered_npcs(self):
+    return self._npcs
+
+  def create_npc(self, x, y, walkability_strategy, opts={}):
+    npc = Npc(x, y, self, walkability_strategy, opts)
+    self._npcs.append(npc)
+    return npc
+
+  def next_slot(self):
+    slot_index = self.current_slot
+    self.current_slot += 1
+    return slot_index
+
+  def get_npcs_in_chunk(self, chunk_x, chunk_y):
+    return self.npc_chunk_lookup[chunk_x][chunk_y].values()
+
+  def get_living_npcs_in_chunk(self, chunk_x, chunk_y):
+    return [n for n in self.npc_chunk_lookup[chunk_x][chunk_y].values() if n.is_dead() is False]
+
+  def get_living_npcs_in_chunk_by_abs_coordinate(self, coordinate):
+    chunk = self.get_chunk(coordinate[0], coordinate[1])
+    return self.get_living_npcs_in_chunk(chunk[0], chunk[1])
+
+  def add_to_chunk(self, npc, chunk_x, chunk_y):
+    self.npc_chunk_lookup[chunk_x][chunk_y][npc.slot_index] = npc
+
+  def remove_from_chunk(self, npc, chunk_x, chunk_y):
+    self.npc_chunk_lookup[chunk_x][chunk_y].pop(npc.slot_index, None)
+
+  def get_chunk(self, x, y):
+    return (x // 8, y // 8)
+
+  def get_npc_stats(self, npc_struct):
+    npc_id = npc_struct['id']
+    if npc_id in [3269, 11942, 11943, 11944, 3270, 11945, 3271, 11946, 11947, 3273, 3274]:
+      return {'id': npc_id, 'max_range': 4, 'wander_range': 2, 'hitpoints': 22, 'combat_level': 10, 'name': 'Guard'}
+    return {'id': npc_id}
+
+from enum import Enum
 class NpcMode(Enum):
   WANDER = 1
   PATROL = 2
@@ -107,16 +168,17 @@ class NpcMode(Enum):
   PLAYERFACECLOSE = 6
 
 class Npc:
-
-  def __init__(self, x: int, y: int, opts={}):
+  def __init__(self, x: int, y: int, npc_registry, walkability_strategy, opts={}):
     self.queue = []
-    self.slot_index = next_slot() # This should eventually be passed in
+    self.slot_index = npc_registry.next_slot()
     self._x = x
     self._y = y
     self.respawn_coordinate = (x, y)
-    chunk = get_chunk(x, y)
-    add_to_chunk(self, chunk[0], chunk[1])
+    chunk = npc_registry.get_chunk(x, y)
 
+    self.npc_registry = npc_registry
+    self.npc_registry.add_to_chunk(self, chunk[0], chunk[1])
+    self.walkability_strategy = walkability_strategy
     self.npc_id = opts.get('id', None)
     self.name = opts.get('name', f'Npc {self.slot_index}{" (id: " + str(self.npc_id) + ")" if self.npc_id else ""}')
     self.max_hitpoints = opts.get('hitpoints', 1)
@@ -309,13 +371,13 @@ class Npc:
 
     new_coordinate = None
     # Attempt to move to the destination tile
-    if is_walkable_tile(self.coordinate, (self.x + dx, self.y + dy)):
+    if self.walkability_strategy.is_walkable_tile(self.coordinate, (self.x + dx, self.y + dy)):
       new_coordinate = (self.x + dx, self.y + dy)
     elif dx != 0 and dy != 0:
       # If we were trying to go diagonally, but cant, try E/W followed by N/S
-      if is_walkable_tile(self.coordinate, (self.x + dx, self.y)):
+      if self.walkability_strategy.is_walkable_tile(self.coordinate, (self.x + dx, self.y)):
         new_coordinate =  (self.x + dx, self.y)
-      elif is_walkable_tile(self.coordinate, (self.x, self.y + dy)):
+      elif self.walkability_strategy.is_walkable_tile(self.coordinate, (self.x, self.y + dy)):
         new_coordinate =  (self.x, self.y + dy)
 
     if new_coordinate:
@@ -343,11 +405,11 @@ class Npc:
 
   @coordinate.setter
   def _coordinate(self, coord: Tuple[int, int]):
-    old_chunk = get_chunk(self._x, self._y)
-    new_chunk = get_chunk(coord[0], coord[1])
+    old_chunk = self.npc_registry.get_chunk(self._x, self._y)
+    new_chunk = self.npc_registry.get_chunk(coord[0], coord[1])
     if new_chunk != old_chunk:
-      remove_from_chunk(self, old_chunk[0], old_chunk[1])
-      add_to_chunk(self, new_chunk[0], new_chunk[1])
+      self.npc_registry.remove_from_chunk(self, old_chunk[0], old_chunk[1])
+      self.npc_registry.add_to_chunk(self, new_chunk[0], new_chunk[1])
     self._x = coord[0]
     self._y = coord[1]
 
@@ -361,15 +423,55 @@ class Npc:
       debug(f'NPC {self.slot_index} picked a new coord as dest {coord} while in mode {self.mode.name}')
       self._destination_tile = coord
 
+class HuntStrategy:
+  def __init__(self, npc_registry, map_registry, player_registry):
+    self.npc_registry = npc_registry
+    self.map_registry = map_registry
+    self.player_registry = player_registry
+
+  def get_target(self, hunter):
+    raise NotImplementedError
+
+class CannonHuntStrategy(HuntStrategy):
+  def get_target(self, cannon):
+    origin = cannon.coordinate
+    direction = cannon.direction
+    # Cook code ahead
+    ordinal_cannon_distances = [2, 5, 12]
+    cardinal_cannon_distances = [3, 7, 14]
+    cannon_ranges = [1, 2, 5]
+
+    is_cardinal = (direction[0] + direction[1]) % 2 != 0
+    distances = cardinal_cannon_distances if is_cardinal else ordinal_cannon_distances
+    for i in range(3):
+      center = (origin[0] + direction[0] * distances[i], origin[1] + direction[1] * distances[i])
+      center_chunk = (center[0]//8, center[1]//8)
+
+      npcs_in_range = []
+      for x_chunk_offset in [1, 0, -1]:
+        for y_chunk_offset in [1, 0, -1]:
+          chunk = (center_chunk[0] + x_chunk_offset, center_chunk[1] + y_chunk_offset)
+          for npc in self.npc_registry.get_living_npcs_in_chunk(chunk[0], chunk[1]):
+            if npc.is_attackable():
+              if cheb(center, npc.coordinate) <= cannon_ranges[i]:
+                npcs_in_range.append(npc)
+      npcs_in_range.sort(key=lambda npc: euclidean(center, npc.coordinate))
+
+      if len(npcs_in_range) > 0:
+          return npcs_in_range[0]
+
+    return None
+
 class Cannon:
 
   # Cannon LOS is checked from center of cannon and center of checked area
-  def __init__(self, x: int, y: int, player: 'Player'):
+  def __init__(self, x: int, y: int, player: 'Player', hunt_strategy: HuntStrategy):
     self._x = x
     self._y = y
     self.player = player
     # X, Y (positive is right and up resp.)
     self.direction = (0, 1)
+    self.hunt_strategy = hunt_strategy
 
     self.MOVEMENTS = {
       0: {1: (1, 1), -1: (-1, -1)},
@@ -377,12 +479,15 @@ class Cannon:
       -1: {-1: (-1, 0), 0: (-1, 1), 1: (0, 1)},
     }
 
+  @property
+  def coordinate(self):
+    return (self._x, self._y)
+
   def process_tick(self):
     self.fire()
     self.turn()
 
   def turn(self):
-    # Definitely some way to not hardcode but I can't be bothered
     self.direction = self.MOVEMENTS[self.direction[0]][self.direction[1]]
 
   def fire(self):
@@ -395,47 +500,34 @@ class Cannon:
     npc.add_to_queue(DamageAction(damage, self.player))
   
   def get_target(self):
-    origin = (self._x, self._y)
-    direction = self.direction
-    # Cook code ahead
-    ordinal_cannon_distances = [2, 5, 12]
-    cardinal_cannon_distances = [3, 7, 14]
-    cannon_ranges = [1, 2, 5]
+    return self.hunt_strategy.get_target(self)
 
-    is_cardinal = (direction[0] + direction[1]) % 2 != 0
-    distances = cardinal_cannon_distances if is_cardinal else ordinal_cannon_distances
-    for i in range(3):
-        center = (origin[0] + direction[0] * distances[i], origin[1] + direction[1] * distances[i])
-        center_chunk = (center[0]//8, center[1]//8)
+class PlayerRegistry:
+  def __init__(self) -> None:
+    self._players = []
 
-        npcs_in_range = []
-        for x_chunk_offset in [1, 0, -1]:
-            for y_chunk_offset in [1, 0, -1]:
-                chunk = (center_chunk[0] + x_chunk_offset, center_chunk[1] + y_chunk_offset)
-                for npc in get_living_npcs_in_chunk(chunk[0], chunk[1]):
-                    if npc.is_attackable():
-                      if cheb(center, npc.coordinate) <= cannon_ranges[i]:
-                          npcs_in_range.append(npc)
+  @property
+  def registered_players(self):
+    return self._players
 
-        npcs_in_range.sort(key=lambda npc: euclidean(center, npc.coordinate))
-
-        if len(npcs_in_range) > 0:
-            return npcs_in_range[0]
-
-    return None
+  def create_player(self, coordinate, cannon_strategy):
+    player = Player(coordinate, cannon_strategy)
+    self._players.append(player)
+    return player
 
 class Player:
-  def __init__(self):
+  def __init__(self, coordinate, cannon_strategy):
     self._cannon = None
-    self._x = c[0] + 2 
-    self._y = c[1] + 1 
+    self._x = coordinate[0] 
+    self._y = coordinate[1] 
+    self._cannon_strategy = cannon_strategy
 
   def perform_timers(self):
     if self.cannon():
       self.cannon().process_tick()
 
   def place_cannon(self, coordinate: Tuple[int, int]):
-    self._cannon = Cannon(coordinate[0], coordinate[1], self)
+    self._cannon = Cannon(coordinate[0], coordinate[1], self, self._cannon_strategy)
 
   def cannon(self):
     return self._cannon
@@ -457,56 +549,35 @@ class Player:
   def y(self):
     return self._y
 
+class MapRegistry:
+  def __init__(self, map_config):
+    self.map_config = map_config
 
-c = (2962, 3382)
-world_map = create_map_config(c)
-npc_structs = relevant_npcs(c)
-npcs = []
-for s in npc_structs:
-  npcs.append(Npc(s['x'], s['y'], opts=get_npc_stats(s)))
+  def get_objs(self, coordinate):
+    return self.map_config.get(coordinate[0], {}).get(coordinate[1], [])
 
-player = Player()
-player.place_cannon(c)
-players = [player]
-def perform_tick():
-  # Process client input
-  for npc in npcs:
-    # Each npc do
-    #   stalls end
-    npc.perform_timers()
-    #   * queue (take damage)
-    npc.perform_queue()
-    #   interaction with items/objects
-    #   * movement
-    npc.perform_move()
-    #   * interaction with players/npcs (determine pathing the next tick?)
-    npc.perform_interact()
+if __name__ == '__main__':
+  c = (2962, 3382)
+  npc_registry = NpcRegistry()
+  player_registry = PlayerRegistry()
+  map_config = create_map_config(c)
+  map_registry = MapRegistry(map_config)
 
-  # Does this matter at all for a v0? prob not
-  for player in players:
-    # Each player do
-    #   stalls end
-    #   queue (take damage)
-    #   timers (poison?)
-    player.perform_timers() # This fires the cannon
-    #   area queue
-    #   interaction with items/objects
-    #   * (not v0) movement
-    #   * (not v0) interaction with players/npcs
+  # Populate npc_registry
+  npc_structs = relevant_npcs(c)
+  npcs = []
+  strategy = SimpleWalkabilityStrategy(map_registry, npc_registry, player_registry)
+  for s in npc_structs:
+    npc_registry.create_npc(s['x'], s['y'], strategy, opts=npc_registry.get_npc_stats(s))
 
-class DamageAction(Action):
-  def __init__(self, damage: int, attacker: Player):
-    self.damage = damage
-    self.attacker = attacker
+  # Populate player_registry
+  player = player_registry.create_player(c, CannonHuntStrategy(npc_registry, map_registry, player_registry))
+  player.place_cannon(c)
 
-  def act_on(self, npc: Npc):
-    npc.take_damage(self.damage, self.attacker)
+  # Create and run engine
+  engine = Engine(map_registry, npc_registry, player_registry)
+  engine.perform_ticks(6000)
 
-tick_num = 0
-while tick_num < 6000:
-  debug(f'{tick_num}')
-  perform_tick()
-  tick_num += 1
-for npc in npcs:
-  if npc.times_died > 0:
-    print(f'{npc.name} died {npc.times_died} times')
+  for npc in npc_registry.registered_npcs:
+    if npc.times_died > 0:
+      print(f'{npc.name} died {npc.times_died} times')
