@@ -17,7 +17,7 @@ def debug(msg):
 def get_npc_stats(npc_struct):
   npc_id = npc_struct['id']
   if npc_id in [3269, 11942, 11943, 11944, 3270, 11945, 3271, 11946, 11947, 3273, 3274]:
-    return {'id': npc_id, 'maxrange': 4, 'wanderrange': 2, 'hitpoints': 22, 'combat_level': 10, 'name': 'Guard'}
+    return {'id': npc_id, 'max_range': 4, 'wander_range': 2, 'hitpoints': 22, 'combat_level': 10, 'name': 'Guard'}
   return {'id': npc_id}
 
 def cheb(point1, point2):
@@ -97,9 +97,9 @@ class Npc:
     self.name = opts.get('name', f'Npc {self.slot_index}{" (id: " + str(self.npc_id) + ")" if self.npc_id else ""}')
     self.max_hitpoints = opts.get('hitpoints', 1)
     self._combat_level = opts.get('combat_level', 0)
-    self.respawn_time = opts.get('respawn_time', 80) # 20 tick respawn time, will be dependent on monster
-    self.wanderrange = opts.get('wanderrange', 5) # No clue what the default is here
-    self.maxrange = opts.get('maxrange', 8) # No clue what the default is here
+    self.respawn_time = opts.get('respawn_time', 50) # 50 tick respawn time, will be dependent on monster
+    self.wanderrange = opts.get('wander_range', 5) # No clue what the default is here
+    self.maxrange = opts.get('max_range', 8) # No clue what the default is here
     self.set_interaction(None)
     self.respawn()
     self.times_died = 0
