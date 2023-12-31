@@ -33,6 +33,10 @@ def get_npcs_in_chunk(chunk_x, chunk_y):
 def get_living_npcs_in_chunk(chunk_x, chunk_y):
   return [n for n in npc_chunk_lookup[chunk_x][chunk_y].values() if n.is_dead() is False]
 
+def get_living_npcs_in_chunk_by_abs_coordinate(coordinate):
+  chunk = get_chunk(coordinate[0], coordinate[1])
+  return get_living_npcs_in_chunk(chunk[0], chunk[1])
+
 def add_to_chunk(npc, chunk_x, chunk_y):
   npc_chunk_lookup[chunk_x][chunk_y][npc.slot_index] = npc
 
@@ -43,6 +47,12 @@ def get_chunk(x, y):
   return (x // 8, y // 8)
 
 def is_walkable_tile(old_coord, new_coord):
+  # Not walkable if there is an npc there or object that restricts movement
+  for npc in get_living_npcs_in_chunk_by_abs_coordinate(new_coord):
+    # TODO: Allow if the transparent flag is set
+    if npc.coordinate == (new_coord[0], new_coord[1]):
+      return False
+
   # Get the object at new_coord
   objs_on_coord = world_map[new_coord[0]][new_coord[1]]
   if objs_on_coord:
@@ -51,12 +61,6 @@ def is_walkable_tile(old_coord, new_coord):
       if LOC_ID_TO_CONFIG_MAP[loc['id']].get('is_transparent', False) is False:
         return False
 
-  # Not walkable if there is an object or npc there
-  # TODO: Check for objects
-  for npc in npcs:
-    # TODO: Allow if the transparent flag is set
-    if npc.coordinate == (new_coord[0], new_coord[1]):
-      return False
 
   return True
 
