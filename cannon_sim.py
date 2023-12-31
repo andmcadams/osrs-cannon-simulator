@@ -157,10 +157,12 @@ class Npc:
     self.hitpoints -= damage_taken
     if self.interacting_with is None:
       self.set_interaction(attacker)
-    if self.can_attack():
-      self.mode = NpcMode.PLAYERFOLLOW
-    else:
-      self.mode = NpcMode.PLAYERESCAPE
+    
+    if self.interacting_with == attacker:
+      if self.can_attack(attacker):
+        self.mode = NpcMode.PLAYERFOLLOW
+      else:
+        self.mode = NpcMode.PLAYERESCAPE
 
     debug(f'Npc {self.slot_index} took {damage_taken} damage (hit a {amount})')
     if self.hitpoints <= 0:
