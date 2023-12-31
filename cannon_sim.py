@@ -153,10 +153,10 @@ class Npc:
     self.hitpoints -= damage_taken
     if self.interacting_with is None:
       self.set_interaction(attacker)
-    if abs(attacker.x - self.x) >= self.maxrange or abs(attacker.y - self.y) >= self.maxrange:
-      self.mode = NpcMode.PLAYERESCAPE
-    else:
+    if self.can_attack():
       self.mode = NpcMode.PLAYERFOLLOW
+    else:
+      self.mode = NpcMode.PLAYERESCAPE
 
     debug(f'Npc {self.slot_index} took {damage_taken} damage (hit a {amount})')
     if self.hitpoints <= 0:
@@ -167,6 +167,21 @@ class Npc:
     if entity:
       debug(f'Npc {self.slot_index} interacting with new entity {entity}')
     self.interacting_with = entity
+
+  def can_attack(self, player: 'Player'):
+    # MELEE (non halberd)
+    dist_x = player.coordinate[0] - self.respawn_coordinate[0]
+    dist_y = player.coordinate[1] - self.respawn_coordinate[1]
+    if dist_x >= dist_y:
+      dist_x -= 1
+    else:
+      dist_y -= 1
+    if max(dist_x, dist_y) <= self.maxrange:
+      return True
+
+    # TODO: Add case for range/mage/long melee
+
+    return False
 
   @property
   def mode(self):
@@ -322,6 +337,7 @@ class Npc:
 
 class Cannon:
 
+  # Cannon LOS is checked from center of cannon and center of checked area
   def __init__(self, x: int, y: int, player: 'Player'):
     self._x = x
     self._y = y
