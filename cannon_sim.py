@@ -3,7 +3,7 @@ import random
 from collections import defaultdict
 from typing import Tuple
 from enum import Enum
-from create_map import create_map_config, LOC_ID_TO_CONFIG_MAP, relevant_npcs
+from create_map import create_map_config, LOC_ID_TO_CONFIG_MAP, relevant_npcs, Mask
 
 players = []
 npcs = []
@@ -58,8 +58,28 @@ def is_walkable_tile(old_coord, new_coord):
   if objs_on_coord:
     for loc in objs_on_coord:
       debug('Would have bumped into an object!')
-      if LOC_ID_TO_CONFIG_MAP[loc['id']].get('is_transparent', False) is False:
-        return False
+      direction_x = new_coord[0] - old_coord[0]
+      direction_y = new_coord[1] - old_coord[1]
+      blockers = loc.get('blockers', 0)
+      if blockers == 0:
+        continue
+
+      # Moving E
+      if direction_x == 1:
+        if loc['blockers'] & Mask.LEFT:
+          return False
+      # Moving W
+      if direction_x == -1:
+        if loc['blockers'] & Mask.RIGHT:
+          return False
+      # Moving N
+      if direction_y == 1:
+        if loc['blockers'] & Mask.BOTTOM:
+          return False
+      # Moving S
+      if direction_y == -1:
+        if loc['blockers'] & Mask.TOP:
+          return False
 
 
   return True
