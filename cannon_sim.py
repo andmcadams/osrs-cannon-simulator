@@ -3,14 +3,22 @@ import random
 from collections import defaultdict
 from typing import Tuple
 from enum import Enum
+from create_map import create_map_config, LOC_ID_TO_CONFIG_MAP, relevant_npcs
 
 players = []
 npcs = []
+world_map = {}
 
-DEBUG = True
+DEBUG = False
 def debug(msg):
   if DEBUG == True:
     print(msg)
+
+def get_npc_stats(npc_struct):
+  npc_id = npc_struct['id']
+  if npc_id in [3269, 11942, 11943, 11944, 3270, 11945, 3271, 11946, 11947, 3273, 3274]:
+    return {'id': npc_id, 'maxrange': 4, 'wanderrange': 2, 'hitpoints': 22, 'combat_level': 10, 'name': 'Guard'}
+  return {'id': npc_id}
 
 def cheb(point1, point2):
   return max(abs(point1[0] - point2[0]), abs(point1[1] - point2[1]))
@@ -35,6 +43,14 @@ def get_chunk(x, y):
   return (x // 8, y // 8)
 
 def is_walkable_tile(old_coord, new_coord):
+  # Get the object at new_coord
+  objs_on_coord = world_map[new_coord[0]][new_coord[1]]
+  if objs_on_coord:
+    for loc in objs_on_coord:
+      debug('Would have bumped into an object!')
+      if LOC_ID_TO_CONFIG_MAP[loc['id']].get('is_transparent', False) is False:
+        return False
+
   # Not walkable if there is an object or npc there
   # TODO: Check for objects
   for npc in npcs:
@@ -68,8 +84,7 @@ class NpcMode(Enum):
 
 class Npc:
 
-  def __init__(self, x: int, y: int, max_hitpoints: int, opts={}):
-    self.max_hitpoints = max_hitpoints
+  def __init__(self, x: int, y: int, opts={}):
     self.queue = []
     self.slot_index = next_slot() # This should eventually be passed in
     self._x = x
@@ -78,6 +93,10 @@ class Npc:
     chunk = get_chunk(x, y)
     add_to_chunk(self, chunk[0], chunk[1])
 
+    self.npc_id = opts.get('id', None)
+    self.name = opts.get('name', f'Npc {self.slot_index}{" (id: " + str(self.npc_id) + ")" if self.npc_id else ""}')
+    self.max_hitpoints = opts.get('hitpoints', 1)
+    self._combat_level = opts.get('combat_level', 0)
     self.respawn_time = opts.get('respawn_time', 80) # 20 tick respawn time, will be dependent on monster
     self.wanderrange = opts.get('wanderrange', 5) # No clue what the default is here
     self.maxrange = opts.get('maxrange', 8) # No clue what the default is here
@@ -87,6 +106,9 @@ class Npc:
 
   def is_dead(self):
     return self._is_dead
+
+  def is_attackable(self):
+    return self._combat_level != 0
 
   def respawn(self):
     self._is_dead = False
@@ -349,8 +371,9 @@ class Cannon:
             for y_chunk_offset in [1, 0, -1]:
                 chunk = (center_chunk[0] + x_chunk_offset, center_chunk[1] + y_chunk_offset)
                 for npc in get_living_npcs_in_chunk(chunk[0], chunk[1]):
-                    if cheb(center, npc.coordinate) <= cannon_ranges[i]:
-                        npcs_in_range.append(npc)
+                    if npc.is_attackable():
+                      if cheb(center, npc.coordinate) <= cannon_ranges[i]:
+                          npcs_in_range.append(npc)
 
         npcs_in_range.sort(key=lambda npc: euclidean(center, npc.coordinate))
 
@@ -362,15 +385,15 @@ class Cannon:
 class Player:
   def __init__(self):
     self._cannon = None
-    self._x = 0
-    self._y = 0
+    self._x = c[0] + 2 
+    self._y = c[1] + 1 
 
   def perform_timers(self):
     if self.cannon():
       self.cannon().process_tick()
 
-  def place_cannon(self, x: int, y: int):
-    self._cannon = Cannon(x, y, self)
+  def place_cannon(self, coordinate: Tuple[int, int]):
+    self._cannon = Cannon(coordinate[0], coordinate[1], self)
 
   def cannon(self):
     return self._cannon
@@ -393,9 +416,15 @@ class Player:
     return self._y
 
 
-npcs = [Npc(0, -4, 100), Npc(0, -4, 100)]
+c = (2962, 3382)
+world_map = create_map_config(c)
+npc_structs = relevant_npcs(c)
+npcs = []
+for s in npc_structs:
+  npcs.append(Npc(s['x'], s['y'], opts=get_npc_stats(s)))
+
 player = Player()
-player.place_cannon(0, 0)
+player.place_cannon(c)
 players = [player]
 def perform_tick():
   # Process client input
@@ -432,9 +461,10 @@ class DamageAction(Action):
     npc.take_damage(self.damage, self.attacker)
 
 tick_num = 0
-while tick_num < 200:
+while tick_num < 6000:
   debug(f'{tick_num}')
   perform_tick()
   tick_num += 1
 for npc in npcs:
-  debug(f'Npc {npc.slot_index} died {npc.times_died} times')
+  if npc.times_died > 0:
+    print(f'{npc.name} died {npc.times_died} times')
