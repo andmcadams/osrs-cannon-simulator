@@ -79,7 +79,8 @@ class SimpleWalkabilityStrategy(WalkabilityStrategy):
     # Not walkable if there is an npc there or object that restricts movement
     for npc in self.npc_registry.get_living_npcs_in_chunk_by_abs_coordinate(new_coord):
       # TODO: Allow if the transparent flag is set
-      if npc.coordinate == (new_coord[0], new_coord[1]):
+      # TODO: Should this account for the Npc trying to walk on itself?
+      if npc.coordinate == new_coord:
         return False
 
     # Get the object at new_coord
@@ -90,73 +91,95 @@ class SimpleWalkabilityStrategy(WalkabilityStrategy):
         debug('Would have bumped into an object!')
         direction_x = new_coord[0] - old_coord[0]
         direction_y = new_coord[1] - old_coord[1]
-        blockers = loc.get('blockers', 0)
+        blockers = loc.get('movement_flags', 0)
         if blockers == 0:
           continue
 
         # Moving E
         if direction_x == 1:
-          if loc['blockers'] & Mask.LEFT:
+          if blockers & Mask.LEFT:
             return False
         # Moving W
         if direction_x == -1:
-          if loc['blockers'] & Mask.RIGHT:
+          if blockers & Mask.RIGHT:
             return False
         # Moving N
         if direction_y == 1:
-          if loc['blockers'] & Mask.BOTTOM:
+          if blockers & Mask.BOTTOM:
             return False
         # Moving S
         if direction_y == -1:
-          if loc['blockers'] & Mask.TOP:
+          if blockers & Mask.TOP:
             return False
     return True
 
 from collections import defaultdict
 class NpcRegistry:
   def __init__(self) -> None:
+    self._initialize_state()
+
+  def _initialize_state(self):
+    # Give us a clean slate to work from
     self._npcs = []
     self.current_slot = 0
     self.npc_chunk_lookup = defaultdict(lambda: defaultdict(dict))
+
+  def reset(self):
+    self._initialize_state()
 
   @property
   def registered_npcs(self):
     return self._npcs
 
   def create_npc(self, x, y, walkability_strategy, opts={}):
-    npc = Npc(x, y, self, walkability_strategy, opts)
-    self._npcs.append(npc)
-    return npc
+    npc = Npc(self._next_slot(), x, y, self, walkability_strategy, opts)
 
-  def next_slot(self):
-    slot_index = self.current_slot
-    self.current_slot += 1
-    return slot_index
+    # Add them to the chunk for tracking
+    chunk = self._get_chunk(x, y)
+    self._add_to_chunk(npc, chunk[0], chunk[1])
+
+    # Add to registered npc list
+    self._npcs.append(npc)
+
+    return npc
 
   def get_npcs_in_chunk(self, chunk_x, chunk_y):
     return self.npc_chunk_lookup[chunk_x][chunk_y].values()
 
   def get_living_npcs_in_chunk(self, chunk_x, chunk_y):
-    return [n for n in self.npc_chunk_lookup[chunk_x][chunk_y].values() if n.is_dead() is False]
+    return [n for n in self.get_npcs_in_chunk(chunk_x, chunk_y) if n.is_dead() is False]
 
   def get_living_npcs_in_chunk_by_abs_coordinate(self, coordinate):
-    chunk = self.get_chunk(coordinate[0], coordinate[1])
+    chunk = self._get_chunk(coordinate[0], coordinate[1])
     return self.get_living_npcs_in_chunk(chunk[0], chunk[1])
 
-  def add_to_chunk(self, npc, chunk_x, chunk_y):
-    self.npc_chunk_lookup[chunk_x][chunk_y][npc.slot_index] = npc
-
-  def remove_from_chunk(self, npc, chunk_x, chunk_y):
-    self.npc_chunk_lookup[chunk_x][chunk_y].pop(npc.slot_index, None)
-
-  def get_chunk(self, x, y):
-    return (x // 8, y // 8)
+  def update_npc_location(self, npc, old_coord, new_coord):
+    old_chunk = self._get_chunk(old_coord[0], old_coord[1])
+    new_chunk = self._get_chunk(new_coord[0], new_coord[1])
+    if new_chunk != old_chunk:
+      self._remove_from_chunk(npc, old_chunk[0], old_chunk[1])
+      self._add_to_chunk(npc, new_chunk[0], new_chunk[1])
 
   def get_npc_stats(self, npc_struct):
     npc_id = npc_struct['id']
     if npc_id in [3269, 11942, 11943, 11944, 3270, 11945, 3271, 11946, 11947, 3273, 3274]:
       return {'id': npc_id, 'max_range': 4, 'wander_range': 2, 'hitpoints': 22, 'combat_level': 10, 'name': 'Guard'}
     return {'id': npc_id}
+
+  def _add_to_chunk(self, npc, chunk_x, chunk_y):
+    self.npc_chunk_lookup[chunk_x][chunk_y][npc.slot_index] = npc
+
+  def _remove_from_chunk(self, npc, chunk_x, chunk_y):
+    self.npc_chunk_lookup[chunk_x][chunk_y].pop(npc.slot_index, None)
+
+  def _get_chunk(self, x, y):
+    return (x // 8, y // 8)
+
+  def _next_slot(self):
+    slot_index = self.current_slot
+    self.current_slot += 1
+    return slot_index
+
 
 from enum import Enum
 class NpcMode(Enum):
@@ -168,25 +191,22 @@ class NpcMode(Enum):
   PLAYERFACECLOSE = 6
 
 class Npc:
-  def __init__(self, x: int, y: int, npc_registry, walkability_strategy, opts={}):
+  def __init__(self, slot_index: int, x: int, y: int, npc_registry, walkability_strategy, opts={}):
     self.queue = []
-    self.slot_index = npc_registry.next_slot()
+    self.slot_index = slot_index
     self._x = x
     self._y = y
     self.respawn_coordinate = (x, y)
-    chunk = npc_registry.get_chunk(x, y)
 
     self.npc_registry = npc_registry
-    self.npc_registry.add_to_chunk(self, chunk[0], chunk[1])
     self.walkability_strategy = walkability_strategy
     self.npc_id = opts.get('id', None)
     self.name = opts.get('name', f'Npc {self.slot_index}{" (id: " + str(self.npc_id) + ")" if self.npc_id else ""}')
     self.max_hitpoints = opts.get('hitpoints', 1)
-    self._combat_level = opts.get('combat_level', 0)
+    self._combat_level = opts.get('combat_level', 1)
     self.respawn_time = opts.get('respawn_time', 50) # 50 tick respawn time, will be dependent on monster
     self.wanderrange = opts.get('wander_range', 5) # No clue what the default is here
     self.maxrange = opts.get('max_range', 8) # No clue what the default is here
-    self.set_interaction(None)
     self.respawn()
     self.times_died = 0
 
@@ -205,6 +225,7 @@ class Npc:
     # Reset destination tile, might be changed later in the tick
     self._destination_tile = self.respawn_coordinate
     self._mode = NpcMode.WANDER
+    self.set_interaction(None)
 
   def die(self):
     self._is_dead = True
@@ -405,11 +426,7 @@ class Npc:
 
   @coordinate.setter
   def _coordinate(self, coord: Tuple[int, int]):
-    old_chunk = self.npc_registry.get_chunk(self._x, self._y)
-    new_chunk = self.npc_registry.get_chunk(coord[0], coord[1])
-    if new_chunk != old_chunk:
-      self.npc_registry.remove_from_chunk(self, old_chunk[0], old_chunk[1])
-      self.npc_registry.add_to_chunk(self, new_chunk[0], new_chunk[1])
+    self.npc_registry.update_npc_location(self, self.coordinate, coord)
     self._x = coord[0]
     self._y = coord[1]
 
@@ -433,6 +450,13 @@ class HuntStrategy:
     raise NotImplementedError
 
 class CannonHuntStrategy(HuntStrategy):
+  def _has_line_of_sight(self):
+    # Cannon LOS is weird. Needs LOS to the center spot it is targeting
+    # and LOS from center spot to the target
+    # TODO: Implement LOS check
+    # TODO: Support > 1x1 monsters
+    return True
+  
   def get_target(self, cannon):
     origin = cannon.coordinate
     direction = cannon.direction
@@ -454,7 +478,8 @@ class CannonHuntStrategy(HuntStrategy):
           for npc in self.npc_registry.get_living_npcs_in_chunk(chunk[0], chunk[1]):
             if npc.is_attackable():
               if cheb(center, npc.coordinate) <= cannon_ranges[i]:
-                npcs_in_range.append(npc)
+                if self._has_line_of_sight():
+                  npcs_in_range.append(npc)
       npcs_in_range.sort(key=lambda npc: euclidean(center, npc.coordinate))
 
       if len(npcs_in_range) > 0:
@@ -528,6 +553,7 @@ class Player:
 
   def place_cannon(self, coordinate: Tuple[int, int]):
     self._cannon = Cannon(coordinate[0], coordinate[1], self, self._cannon_strategy)
+    return self._cannon
 
   def cannon(self):
     return self._cannon
