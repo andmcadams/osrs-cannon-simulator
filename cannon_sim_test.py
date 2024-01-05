@@ -1,34 +1,76 @@
 from unittest import TestCase, main, skip
 from cannon_sim import *
 
-@skip
+def is_north_tile_walkable(strategy, coord):
+  return strategy.is_walkable_tile(coord, (coord[0], coord[1] + 1))
+def is_northeast_tile_walkable(strategy, coord):
+  return strategy.is_walkable_tile(coord, (coord[0] + 1, coord[1] + 1))
+def is_east_tile_walkable(strategy, coord):
+  return strategy.is_walkable_tile(coord, (coord[0] + 1, coord[1]))
+def is_southeast_tile_walkable(strategy, coord):
+  return strategy.is_walkable_tile(coord, (coord[0] + 1, coord[1] - 1))
+def is_south_tile_walkable(strategy, coord):
+  return strategy.is_walkable_tile(coord, (coord[0], coord[1] - 1))
+def is_southwest_tile_walkable(strategy, coord):
+  return strategy.is_walkable_tile(coord, (coord[0] - 1, coord[1] - 1))
+def is_west_tile_walkable(strategy, coord):
+  return strategy.is_walkable_tile(coord, (coord[0] - 1, coord[1]))
+def is_northwest_tile_walkable(strategy, coord):
+  return strategy.is_walkable_tile(coord, (coord[0] - 1, coord[1] + 1))
+
 class SimpleWalkabilityStrategyTest(TestCase):
 
-  def setUp(self):
-    npc_registry = NpcRegistry()
-    player_registry = PlayerRegistry()
-    map_config = {
-      1: {
-        0: [{'name': 'Wall', 'movement_flags': Mask.RIGHT, 'blocks_projectiles': True }]
-      },
-      3: {
-        0: [{'name': 'Wall', 'movement_flags': Mask.LEFT, 'blocks_projectiles': True }]
-      },
-      5: {
-        0: [{'name': 'Wall', 'movement_flags': Mask.BOTTOM, 'blocks_projectiles': True }]
-      },
-      7: {
-        0: [{'name': 'Wall', 'movement_flags': Mask.TOP, 'blocks_projectiles': True }]
-      },
-    }
-    map_registry = MapRegistry(map_config)
-    self.strategy = SimpleWalkabilityStrategy(map_registry, npc_registry, player_registry)
+  def test_is_walkable_tile_should_block_left_mask(self):
+    map_registry = MapRegistry({ 0: { 0: {'movement_flags': Mask.LEFT, 'projectile_flags': 0 } } })
+    strategy = SimpleWalkabilityStrategy(map_registry, NpcRegistry(), PlayerRegistry())
+    coord = (0, 0)
+    self.assertTrue(is_north_tile_walkable(strategy, coord))
+    self.assertTrue(is_northeast_tile_walkable(strategy, coord))
+    self.assertTrue(is_east_tile_walkable(strategy, coord))
+    self.assertTrue(is_southeast_tile_walkable(strategy, coord))
+    self.assertTrue(is_south_tile_walkable(strategy, coord))
+    self.assertFalse(is_southwest_tile_walkable(strategy, coord))
+    self.assertFalse(is_west_tile_walkable(strategy, coord))
+    self.assertFalse(is_northwest_tile_walkable(strategy, coord))
 
-  def test_is_walkable_tile_should_block_east_movement(self):
-    self.assertFalse(self.strategy.is_walkable_tile((0, 0), (1, 0)))
+  def test_is_walkable_tile_should_block_top_mask(self):
+    map_registry = MapRegistry({ 0: { 0: {'movement_flags': Mask.TOP, 'projectile_flags': 0 } } })
+    strategy = SimpleWalkabilityStrategy(map_registry, NpcRegistry(), PlayerRegistry())
+    coord = (0, 0)
+    self.assertFalse(is_north_tile_walkable(strategy, coord))
+    self.assertFalse(is_northeast_tile_walkable(strategy, coord))
+    self.assertTrue(is_east_tile_walkable(strategy, coord))
+    self.assertTrue(is_southeast_tile_walkable(strategy, coord))
+    self.assertTrue(is_south_tile_walkable(strategy, coord))
+    self.assertTrue(is_southwest_tile_walkable(strategy, coord))
+    self.assertTrue(is_west_tile_walkable(strategy, coord))
+    self.assertFalse(is_northwest_tile_walkable(strategy, coord))
 
-  def test_is_walkable_tile_should_block_west_movement(self):
-    self.assertFalse(self.strategy.is_walkable_tile((4, 0), (3, 0)))
+  def test_is_walkable_tile_should_block_right_mask(self):
+    map_registry = MapRegistry({ 0: { 0: {'movement_flags': Mask.RIGHT, 'projectile_flags': 0 } } })
+    strategy = SimpleWalkabilityStrategy(map_registry, NpcRegistry(), PlayerRegistry())
+    coord = (0, 0)
+    self.assertTrue(is_north_tile_walkable(strategy, coord))
+    self.assertFalse(is_northeast_tile_walkable(strategy, coord))
+    self.assertFalse(is_east_tile_walkable(strategy, coord))
+    self.assertFalse(is_southeast_tile_walkable(strategy, coord))
+    self.assertTrue(is_south_tile_walkable(strategy, coord))
+    self.assertTrue(is_southwest_tile_walkable(strategy, coord))
+    self.assertTrue(is_west_tile_walkable(strategy, coord))
+    self.assertTrue(is_northwest_tile_walkable(strategy, coord))
+
+  def test_is_walkable_tile_should_block_bottom_mask(self):
+    map_registry = MapRegistry({ 0: { 0: {'movement_flags': Mask.BOTTOM, 'projectile_flags': 0 } } })
+    strategy = SimpleWalkabilityStrategy(map_registry, NpcRegistry(), PlayerRegistry())
+    coord = (0, 0)
+    self.assertTrue(is_north_tile_walkable(strategy, coord))
+    self.assertTrue(is_northeast_tile_walkable(strategy, coord))
+    self.assertTrue(is_east_tile_walkable(strategy, coord))
+    self.assertFalse(is_southeast_tile_walkable(strategy, coord))
+    self.assertFalse(is_south_tile_walkable(strategy, coord))
+    self.assertFalse(is_southwest_tile_walkable(strategy, coord))
+    self.assertTrue(is_west_tile_walkable(strategy, coord))
+    self.assertTrue(is_northwest_tile_walkable(strategy, coord))
 
 class NpcRegistryTest(TestCase):
 

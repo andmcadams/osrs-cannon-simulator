@@ -75,6 +75,48 @@ class WalkabilityStrategy:
     raise NotImplementedError
 
 class SimpleWalkabilityStrategy(WalkabilityStrategy):
+  def _blocks_direction(self, direction, blockers):
+
+    moving = 0
+    if direction[0] == 1:
+      moving |= Mask.RIGHT
+    if direction[0] == -1:
+      moving |= Mask.LEFT
+    if direction[1] == 1:
+      moving |= Mask.TOP
+    if direction[1] == -1:
+      moving |= Mask.BOTTOM
+
+    if direction[0] == 1 and direction [1] == 1:
+      moving |= Mask.TOP_RIGHT
+    if direction[0] == -1 and direction [1] == 1:
+      moving |= Mask.TOP_LEFT
+    if direction[0] == 1 and direction [1] == -1:
+      moving |= Mask.BOTTOM_RIGHT
+    if direction[0] == -1 and direction [1] == -1:
+      moving |= Mask.BOTTOM_LEFT
+
+    return bool(blockers & moving)
+
+
+  def _are_objects_blocking(self, old_coord, new_coord):
+    direction = (new_coord[0] - old_coord[0], new_coord[1] - old_coord[1])
+    flags = self.map_registry.get_objs(old_coord).get('movement_flags', 0)
+    if self._blocks_direction(direction, flags):
+      return True
+    if direction[0] != 0 and direction[1] != 0:
+      # If trying to go diagonally, check both components
+      # This is probably worth precomputing with flags
+      if self.is_walkable_tile(old_coord, (old_coord[0] + direction[0], old_coord[1])) is False:
+        return True
+      if self.is_walkable_tile((old_coord[0] + direction[0], old_coord[1]), new_coord) is False:
+        return True
+      if self.is_walkable_tile(old_coord, (old_coord[0], old_coord[1] + direction[1])) is False:
+        return True
+      if self.is_walkable_tile((old_coord[0], old_coord[1] + direction[1]), new_coord) is False:
+        return True
+    return False
+
   def is_walkable_tile(self, old_coord, new_coord):
     # Not walkable if there is an npc there or object that restricts movement
     for npc in self.npc_registry.get_living_npcs_in_chunk_by_abs_coordinate(new_coord):
@@ -83,34 +125,14 @@ class SimpleWalkabilityStrategy(WalkabilityStrategy):
       if npc.coordinate == new_coord:
         return False
 
-    # Get the object at new_coord
-    # objs_on_coord = world_map[new_coord[0]][new_coord[1]]
-    objs_on_coord = self.map_registry.get_objs(new_coord)
-    if objs_on_coord:
-      for loc in objs_on_coord:
-        debug('Would have bumped into an object!')
-        direction_x = new_coord[0] - old_coord[0]
-        direction_y = new_coord[1] - old_coord[1]
-        blockers = loc.get('movement_flags', 0)
-        if blockers == 0:
-          continue
+    # Is there something on the current tile blocking me?
+    if self._are_objects_blocking(old_coord, new_coord):
+      return False
 
-        # Moving E
-        if direction_x == 1:
-          if blockers & Mask.LEFT:
-            return False
-        # Moving W
-        if direction_x == -1:
-          if blockers & Mask.RIGHT:
-            return False
-        # Moving N
-        if direction_y == 1:
-          if blockers & Mask.BOTTOM:
-            return False
-        # Moving S
-        if direction_y == -1:
-          if blockers & Mask.TOP:
-            return False
+    # Is there something on the new tile blocking me?
+    if self._are_objects_blocking(new_coord, old_coord):
+      return False
+
     return True
 
 from collections import defaultdict
@@ -580,7 +602,7 @@ class MapRegistry:
     self.map_config = map_config
 
   def get_objs(self, coordinate):
-    return self.map_config.get(coordinate[0], {}).get(coordinate[1], [])
+    return self.map_config.get(coordinate[0], {}).get(coordinate[1], {})
 
 if __name__ == '__main__':
   c = (2962, 3382)
