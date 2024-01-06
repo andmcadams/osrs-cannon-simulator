@@ -186,7 +186,7 @@ class NpcRegistry:
     npc_id = npc_struct['id']
     if npc_id in [3269, 11942, 11943, 11944, 3270, 11945, 3271, 11946, 11947, 3273, 3274]:
       return {'id': npc_id, 'max_range': 4, 'wander_range': 2, 'hitpoints': 22, 'combat_level': 10, 'name': 'Guard'}
-    return {'id': npc_id}
+    return {'id': npc_id }
 
   def _add_to_chunk(self, npc, chunk_x, chunk_y):
     self.npc_chunk_lookup[chunk_x][chunk_y][npc.slot_index] = npc
@@ -471,12 +471,84 @@ class HuntStrategy:
   def get_target(self, hunter):
     raise NotImplementedError
 
+  def _zero_fill_right_shift(self, val, n):
+    return (val >> n) if val >= 0 else ((val + 0x100000000) >> n)
+
+  def has_line_of_sight(self, coord, end_coord):
+    # Code is a translation of Runelite's code here:
+    # https://github.com/runelite/runelite/blob/28821c16effced33780da52dccbb69e5757b63e2/runelite-api/src/main/java/net/runelite/api/coords/WorldArea.java#L570
+    # TODO: Some sort of plane check to handle multiple planes
+    # TODO: If you're inside an object, fail immediately
+
+    if coord == end_coord:
+      return True
+
+    dx = end_coord[0] - coord[0]
+    dy = end_coord[1] - coord[1]
+    dx_abs = abs(dx)
+    dy_abs = abs(dy)
+    x_flags = 0
+    y_flags = 0
+
+    if dx < 0:
+      x_flags |= Mask.RIGHT
+    else:
+      x_flags |= Mask.LEFT
+    if dy < 0:
+      y_flags |= Mask.TOP
+    else:
+      y_flags |= Mask.BOTTOM
+
+    if dx_abs > dy_abs:
+      x = coord[0]
+      y_big = coord[1] << 16
+      slope = (dy << 16) // dx_abs
+      y_big += 0x8000
+      y_big -= 1 if dy < 0 else 0
+      direction = -1 if dx < 0 else 1
+      while x != end_coord[0]:
+        x += direction
+        y = self._zero_fill_right_shift(y_big, 16)
+        if self.map_registry.get_objs((x, y)).get('projectile_flags', 0) & x_flags != 0:
+          # Hit something on the x axis
+          return False
+        y_big += slope
+        next_y = self._zero_fill_right_shift(y_big, 16)
+        if next_y != y and self.map_registry.get_objs((x, next_y)).get('projectile_flags', 0) & y_flags != 0:
+          # Hit something on the y axis
+          return False
+    else:
+      y = coord[1]
+      x_big = coord[0] << 16
+      slope = (dx << 16) // dy_abs
+      x_big += 0x8000
+      x_big -= 1 if dx < 0 else 0
+      direction = -1 if dy < 0 else 1
+      while y != end_coord[1]:
+        y += direction
+        x = self._zero_fill_right_shift(x_big, 16)
+
+        if self.map_registry.get_objs((x, y)).get('projectile_flags', 0) & y_flags != 0:
+          # Hit something on the y axis
+          return False
+        x_big += slope
+        next_x = self._zero_fill_right_shift(x_big, 16)
+        if next_x != x and self.map_registry.get_objs((next_x, y)).get('projectile_flags', 0) & x_flags != 0:
+          # Hit something on the x axis
+          return False
+    return True
+
+
 class CannonHuntStrategy(HuntStrategy):
-  def _has_line_of_sight(self):
+  def has_line_of_sight(self, cannon_center, area_center, npc_coordinate):
     # Cannon LOS is weird. Needs LOS to the center spot it is targeting
     # and LOS from center spot to the target
-    # TODO: Implement LOS check
-    # TODO: Support > 1x1 monsters
+
+    if not super().has_line_of_sight(cannon_center, npc_coordinate):
+      return False
+    if not super().has_line_of_sight(area_center, npc_coordinate):
+      return False
+
     return True
   
   def get_target(self, cannon):
@@ -500,12 +572,15 @@ class CannonHuntStrategy(HuntStrategy):
           for npc in self.npc_registry.get_living_npcs_in_chunk(chunk[0], chunk[1]):
             if npc.is_attackable():
               if cheb(center, npc.coordinate) <= cannon_ranges[i]:
-                if self._has_line_of_sight():
-                  npcs_in_range.append(npc)
+                npcs_in_range.append(npc)
       npcs_in_range.sort(key=lambda npc: euclidean(center, npc.coordinate))
 
       if len(npcs_in_range) > 0:
-          return npcs_in_range[0]
+        # The LOS check seems to happen after selecting a target, and if that target can't be hit the cannon does not fire
+        target_npc = npcs_in_range[0]
+        if self.has_line_of_sight(origin, center, target_npc.coordinate):
+          return target_npc
+        return None
 
     return None
 
