@@ -323,5 +323,29 @@ class NpcInteractionTest(TestCase):
     self.assertEqual(self.npc.mode, NpcMode.PLAYERFOLLOW)
     self.assertEqual(self.npc.interacting_with, self.player)
 
+class PlayerRetaliationTest(TestCase):
+
+  def test_taking_damage_without_target_should_update_target(self):
+    player = PlayerRegistry().create_player((0, 0), StubHuntStrategy())
+    npc = NpcRegistry().create_npc(0, 0, StubWalkabilityStrategy())
+    player.add_to_queue(DamageAction(0, npc))
+
+    player.perform_queue()
+
+    self.assertTrue(player.is_in_combat_with(npc))
+    self.assertEqual(player.time_to_next_attack, player.attack_speed//2)
+
+  def test_taking_damage_with_target_should_keep_old_target(self):
+    player = PlayerRegistry().create_player((0, 0), StubHuntStrategy())
+    npc = NpcRegistry().create_npc(0, 0, StubWalkabilityStrategy())
+    player.in_combat_with = npc
+    npc2 = NpcRegistry().create_npc(0, 0, StubWalkabilityStrategy())
+    player.add_to_queue(DamageAction(0, npc2))
+
+    player.perform_queue()
+
+    self.assertTrue(player.is_in_combat_with(npc))
+    self.assertEqual(player.time_to_next_attack, 0)
+
 if __name__ == '__main__':
   main()

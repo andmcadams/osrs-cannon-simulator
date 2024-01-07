@@ -1,8 +1,11 @@
 import math
 import random
 from create_map import Mask, create_map_config
-from typing import Tuple
+from typing import Tuple, Union
 from create_map import relevant_npcs
+# TODO: Support nxn npcs
+# TODO: Support tiles that block (ex water, dont think i need to support flying npcs)
+# TODO: Support ranged/mage/long melee npcs
 
 DEBUG = False
 # Keep track of Npc movements, can be very memory intensive over long sims
@@ -49,7 +52,9 @@ class Engine:
       #   stalls end
       #   queue (take damage)
       #   timers (poison?)
+      player.perform_queue()
       player.perform_timers() # This fires the cannon
+      player.perform_interact()
       #   area queue
       #   interaction with items/objects
       #   * (not v0) movement
@@ -60,12 +65,12 @@ class Action:
     raise NotImplementedError
 
 class DamageAction(Action):
-  def __init__(self, damage: int, attacker: 'Player'):
+  def __init__(self, damage: int, attacker: Union['Npc', 'Player']):
     self.damage = damage
     self.attacker = attacker
 
-  def act_on(self, npc: 'Npc'):
-    npc.take_damage(self.damage, self.attacker)
+  def act_on(self, entity: Union['Npc', 'Player']):
+    entity.take_damage(self.damage, self.attacker)
 
 class WalkabilityStrategy:
   def __init__(self, map_registry, npc_registry, player_registry) -> None:
@@ -184,10 +189,14 @@ class NpcRegistry:
       self._remove_from_chunk(npc, old_chunk[0], old_chunk[1])
       self._add_to_chunk(npc, new_chunk[0], new_chunk[1])
 
+  GUARD_IDS = {3269, 11942, 11943, 11944, 3270, 11945, 3271, 11946, 11947, 3273, 3274}
+  SKELETON_IDS = {70, 71, 72, 73}
   def get_npc_stats(self, npc_struct):
     npc_id = npc_struct['id']
-    if npc_id in [3269, 11942, 11943, 11944, 3270, 11945, 3271, 11946, 11947, 3273, 3274]:
+    if npc_id in self.GUARD_IDS:
       return {'id': npc_id, 'max_range': 4, 'wander_range': 2, 'hitpoints': 22, 'combat_level': 10, 'name': 'Guard'}
+    if npc_id in self.SKELETON_IDS:
+      return {'id': npc_id,  'max_range': 10, 'wander_range': 8, 'hitpoints': 29, 'combat_level': 22, 'name': 'Skeleton'}
     return {'id': npc_id, 'combat_level': 0 }
 
   def _add_to_chunk(self, npc, chunk_x, chunk_y):
@@ -467,6 +476,11 @@ class Npc:
         if not player.is_in_multicombat() and player.is_in_combat() and not player.is_in_combat_with(self):
           self.set_interaction(None)
           self.mode = NpcMode.WANDER
+        else:
+          self.queue_damage(self.interacting_with)
+
+  def queue_damage(self, target):
+    target.add_to_queue(DamageAction(0, self))
 
   @property
   def x(self):
@@ -675,6 +689,7 @@ class PlayerRegistry:
 
 class Player:
   def __init__(self, coordinate, cannon_strategy):
+    self.queue = []
     self._cannon = None
     self._x = coordinate[0] 
     self._y = coordinate[1] 
@@ -682,13 +697,31 @@ class Player:
     # TODO: This flag should probably go away after not being in combat for some amount of time
     # but it isn't essential to this sim since players can't move
     self.in_combat_with = None
+    self.time_to_next_attack = 0
+    self.attack_speed = 4
 
     # TODO: This feels hacky
     self.map_registry = cannon_strategy.map_registry
 
+  def perform_queue(self):
+    new_queue = []
+    for action in self.queue:
+      action.act_on(self)
+    self.queue = new_queue
+
   def perform_timers(self):
     if self.cannon():
       self.cannon().process_tick()
+
+  def perform_interact(self):
+    # interact with npcs
+    # TODO: This will not work for non-melee enemies
+    if self.is_in_combat():
+      if self.time_to_next_attack <= 0:
+        self.queue_damage(self.in_combat_with)
+        # TODO: Plus one to account for the decr (this is probably not how it is done)
+        self.time_to_next_attack = self.attack_speed + 1
+    self.time_to_next_attack -= 1
 
   def give_loot(self, npc):
     self.in_combat_with = None
@@ -696,7 +729,9 @@ class Player:
   def take_damage(self, amount, attacker):
     # Naive implementation in order to assign in_combat_with
     # This simulation does not care about player hp
-    self.in_combat_with = attacker
+    if not self.is_in_combat():
+      self.in_combat_with = attacker
+      self.time_to_next_attack = self.attack_speed // 2
 
   def place_cannon(self, coordinate: Tuple[int, int]):
     self._cannon = Cannon(coordinate[0], coordinate[1], self, self._cannon_strategy)
@@ -731,6 +766,13 @@ class Player:
   def is_in_multicombat(self):
     self.map_registry.is_in_multicombat(self.coordinate)
 
+  def add_to_queue(self, action: Action):
+    self.queue.append(action)
+
+  def queue_damage(self, npc: Npc):
+    damage = random.randint(0, 40)
+    npc.add_to_queue(DamageAction(damage, self))
+
 class MapRegistry:
   def __init__(self, map_config):
     self.map_config = map_config
@@ -743,7 +785,7 @@ class MapRegistry:
     return False
 
 if __name__ == '__main__':
-  c = (2962, 3382)
+  c = (3373, 9747)
   npc_registry = NpcRegistry()
   player_registry = PlayerRegistry()
   map_config = create_map_config(c)
@@ -758,16 +800,22 @@ if __name__ == '__main__':
 
   # Populate player_registry
   player = player_registry.create_player(c, CannonHuntStrategy(npc_registry, map_registry, player_registry))
-  player.place_cannon(c)
+  player.place_cannon((3378, 9746))
 
   # Create and run engine
   import time
   engine = Engine(map_registry, npc_registry, player_registry)
   start_time = time.time()
   print('Starting the ticks...')
-  engine.perform_ticks(6000)
+  ticks_to_run = 6000
+  engine.perform_ticks(ticks_to_run)
   print('Done with the ticks... ' + str(time.time() - start_time))
 
+  # KC stats
+  total_deaths = 0
   for npc in npc_registry.registered_npcs:
     if npc.times_died > 0:
       print(f'{npc.name} died {npc.times_died} times')
+      total_deaths += npc.times_died
+  print(f'Total kills: {total_deaths}')
+  print(f'Total kills per hour: {total_deaths/(ticks_to_run/6000):.2f}')
