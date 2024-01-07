@@ -19,32 +19,49 @@ class Mask:
   RIGHT = 2
   BOTTOM = 4
   LEFT = 8
+  TOP_LEFT = 16
+  TOP_RIGHT = 32
+  BOTTOM_LEFT = 64
+  BOTTOM_RIGHT = 128
+  OBJECT = 256
 
 def create_map_config(coordinate):
   center_chunk = (coordinate[0]//64, coordinate[1]//64)
-  mapping = defaultdict(lambda: defaultdict(list))
-  for i in range(-1, 1):
-    for j in range(-1, 1):
+  mapping = defaultdict(lambda: defaultdict(dict))
+  for i in [-1, 0, 1]:
+    for j in [-1, 0, 1]:
       chunk_to_load = (center_chunk[0] + i, center_chunk[1] + j)
       file_path = Path(f'./output_configs/m_{chunk_to_load[0]}_{chunk_to_load[1]}.json')
       if file_path.exists():
         with file_path.open() as chunk_file:
           locs = json.load(chunk_file)
           for loc in locs:
-            name = LOC_ID_TO_CONFIG_MAP[loc['id']].get('name', 'null')
+            # Only do plane 0 for now, see how long it takes anyone to notice
+            if loc['plane'] != 0:
+              continue
+
+            current_data = mapping[chunk_to_load[0]*64 + loc['x']][chunk_to_load[1]*64 + loc['y']]
+            existing_blockers = current_data['movement_flags'] if current_data else 0
+            existing_projectile_flags = current_data['projectile_flags'] if current_data else 0
+
             blocks_projectiles = LOC_ID_TO_CONFIG_MAP[loc['id']].get('blocks_projectiles', True)
             rotation = loc.get('rotation', 0)
             typee = loc['type']
             blockers = 0
             if typee == 0:
               blockers |= [Mask.LEFT, Mask.TOP, Mask.RIGHT, Mask.BOTTOM][rotation]
+            if typee == 1 or typee == 3:
+              blockers |= [Mask.TOP_LEFT, Mask.TOP_RIGHT, Mask.BOTTOM_RIGHT, Mask.BOTTOM_LEFT][rotation]
             if typee == 2:
               blockers |= [Mask.TOP + Mask.LEFT, Mask.TOP + Mask.RIGHT, Mask.BOTTOM + Mask.RIGHT, Mask.BOTTOM + Mask.LEFT][rotation]
             if typee == 9:
-              blockers |= Mask.TOP + Mask.LEFT + Mask.RIGHT + Mask.BOTTOM
+              blockers |= Mask.TOP + Mask.LEFT + Mask.RIGHT + Mask.BOTTOM + Mask.OBJECT
             # Add blockers for the basic objects
             if blockers != 0:
-              mapping[chunk_to_load[0]*64 + loc['x']][chunk_to_load[1]*64 + loc['y']].append({'name': name, 'movement_flags': blockers, 'blocks_projectiles': blocks_projectiles})
+              # Load the flags we have for this tile, if there are any. Then or together to get all blockers
+              projectile_flags = blockers if blocks_projectiles else 0
+              result = {'movement_flags': existing_blockers | blockers, 'projectile_flags': existing_projectile_flags | projectile_flags}
+              mapping[chunk_to_load[0]*64 + loc['x']][chunk_to_load[1]*64 + loc['y']] = result
 
             # Special weird case of bigger objects
             if typee == 10:
@@ -55,9 +72,11 @@ def create_map_config(coordinate):
                 dim_x = LOC_ID_TO_CONFIG_MAP[loc['id']].get('dim_y', 1)
                 dim_y = LOC_ID_TO_CONFIG_MAP[loc['id']].get('dim_x', 1)
               blockers = Mask.TOP + Mask.LEFT + Mask.RIGHT + Mask.BOTTOM
-              for i in range(dim_x):
-                for j in range(dim_y):
-                  mapping[chunk_to_load[0]*64 + loc['x'] + i][chunk_to_load[1]*64 + loc['y'] + j].append({'name': name, 'movement_flags': blockers, 'blocks_projectiles': blocks_projectiles})
+              projectile_flags = blockers if blocks_projectiles else 0
+              result = {'movement_flags': existing_blockers | blockers, 'projectile_flags': existing_projectile_flags | projectile_flags}
+              for w in range(dim_x):
+                for z in range(dim_y):
+                  mapping[chunk_to_load[0]*64 + loc['x'] + w][chunk_to_load[1]*64 + loc['y'] + z] = result
   return mapping
 
 def relevant_npcs(coordinate):
