@@ -5,6 +5,8 @@ from typing import Tuple
 from create_map import relevant_npcs
 
 DEBUG = False
+# Keep track of Npc movements, can be very memory intensive over long sims
+DEBUG_NPC_PATHING = False
 def debug(msg):
   if DEBUG == True:
     print(msg)
@@ -186,7 +188,7 @@ class NpcRegistry:
     npc_id = npc_struct['id']
     if npc_id in [3269, 11942, 11943, 11944, 3270, 11945, 3271, 11946, 11947, 3273, 3274]:
       return {'id': npc_id, 'max_range': 4, 'wander_range': 2, 'hitpoints': 22, 'combat_level': 10, 'name': 'Guard'}
-    return {'id': npc_id }
+    return {'id': npc_id, 'combat_level': 0 }
 
   def _add_to_chunk(self, npc, chunk_x, chunk_y):
     self.npc_chunk_lookup[chunk_x][chunk_y][npc.slot_index] = npc
@@ -212,6 +214,14 @@ class NpcMode(Enum):
   PLAYERFACE = 5
   PLAYERFACECLOSE = 6
 
+class NpcMovement:
+  def __init__(self, start_coord, end_coord, destination_tile, successful):
+    self.start_coord = start_coord
+    self.end_coord = end_coord
+    self.destination_tile = destination_tile
+    self.successful = successful
+
+
 class Npc:
   def __init__(self, slot_index: int, x: int, y: int, npc_registry, walkability_strategy, opts={}):
     self.queue = []
@@ -219,6 +229,7 @@ class Npc:
     self._x = x
     self._y = y
     self.respawn_coordinate = (x, y)
+    self.travel_path = []
 
     self.npc_registry = npc_registry
     self.walkability_strategy = walkability_strategy
@@ -410,6 +421,8 @@ class Npc:
     
     if dx == 0 and dy == 0:
       debug(f'Npc {self.slot_index} is at destination tile already')
+      if DEBUG_NPC_PATHING:
+        self.travel_path.append(NpcMovement(self._coordinate, self._coordinate, self.destination_tile, self.mode.name))
       return
 
     new_coordinate = None
@@ -423,6 +436,8 @@ class Npc:
       elif self.walkability_strategy.is_walkable_tile(self.coordinate, (self.x, self.y + dy)):
         new_coordinate =  (self.x, self.y + dy)
 
+    if DEBUG_NPC_PATHING:
+      self.travel_path.append(NpcMovement(self._coordinate, new_coordinate, self.destination_tile, self.mode.name))
     if new_coordinate:
       self._coordinate = new_coordinate
     else:
@@ -698,8 +713,12 @@ if __name__ == '__main__':
   player.place_cannon(c)
 
   # Create and run engine
+  import time
   engine = Engine(map_registry, npc_registry, player_registry)
+  start_time = time.time()
+  print('Starting the ticks...')
   engine.perform_ticks(6000)
+  print('Done with the ticks... ' + str(time.time() - start_time))
 
   for npc in npc_registry.registered_npcs:
     if npc.times_died > 0:
