@@ -203,15 +203,60 @@ class CannonHuntStrategyTest(TestCase):
         self.assertEqual(strat.get_target(cannon).slot_index, npc.slot_index)
       cannon.turn()
 
+  def test_get_target_should_not_target_another_npc_in_single_combat(self):
+    map_registry = MapRegistry({})
+    player_registry = PlayerRegistry()
+    npc_registry = NpcRegistry()
+    strat = CannonHuntStrategy(npc_registry, map_registry, player_registry)
+
+    player = player_registry.create_player((0, 0), strat)
+    cannon = player.place_cannon((0, 0))
+    npc = npc_registry.create_npc(-3, 0, StubWalkabilityStrategy(), {'combat_level': 1})
+    npc.is_in_multicombat = Mock(return_value=False) # Stub to avoid nil error
+
+    # Player should be under attack
+    player.in_combat_with = npc
+
+    # Npc should be in singles in cannon range
+    npc2 = npc_registry.create_npc(0, 3, StubWalkabilityStrategy(), {'combat_level': 1})
+    npc2.is_in_multicombat = Mock(return_value=False)
+
+    self.assertIsNone(strat.get_target(cannon))
+
+  def test_get_target_should_target_another_npc_in_multi_combat(self):
+    map_registry = MapRegistry({})
+    player_registry = PlayerRegistry()
+    npc_registry = NpcRegistry()
+    strat = CannonHuntStrategy(npc_registry, map_registry, player_registry)
+
+    player = player_registry.create_player((0, 0), strat)
+    cannon = player.place_cannon((0, 0))
+    npc = npc_registry.create_npc(-3, 0, StubWalkabilityStrategy(), {'combat_level': 1})
+    npc.is_in_multicombat = Mock(return_value=True) # Stub to avoid nil error
+
+    # Player should be under attack
+    player.in_combat_with = npc
+
+    # Npc should be in multi in cannon range
+    npc2 = npc_registry.create_npc(0, 3, StubWalkabilityStrategy(), {'combat_level': 1})
+    npc2.is_in_multicombat = Mock(return_value=True)
+
+
+    self.assertTrue(strat.get_target(cannon) == npc2)
+
 class StubWalkabilityStrategy(WalkabilityStrategy):
   def __init__(self):
     self.map_registry = None
 
-class SingleCombatTest(TestCase):
+class StubHuntStrategy(HuntStrategy):
+  def __init__(self):
+    self.map_registry = None
+
+class NpcInteractionTest(TestCase):
 
   def setUp(self):
     player_registry = PlayerRegistry()
-    self.player = player_registry.create_player((0, 0), None)
+    self.player = player_registry.create_player((0, 0), StubHuntStrategy())
 
     # Create an Npc focused on the player, standing next to the player
     self.npc_registry = NpcRegistry()
@@ -221,7 +266,7 @@ class SingleCombatTest(TestCase):
 
   def test_interacting_with_player_in_combat_in_single_combat_should_deaggro(self):
     # The player is in a singles zone and in combat with another Npc
-    self.npc.is_in_multicombat = Mock(return_value=False)
+    self.player.is_in_multicombat = Mock(return_value=False)
     npc2 = self.npc_registry.create_npc(0, -1, StubWalkabilityStrategy())
     self.player.in_combat_with = npc2
 
@@ -232,7 +277,7 @@ class SingleCombatTest(TestCase):
 
   def test_interacting_with_player_in_combat_with_self_in_single_combat_should_stay_aggro(self):
     # The player is in a singles zone and in combat with this Npc
-    self.npc.is_in_multicombat = Mock(return_value=False)
+    self.player.is_in_multicombat = Mock(return_value=False)
     self.player.in_combat_with = self.npc
 
     self.npc.perform_interact()
@@ -242,7 +287,7 @@ class SingleCombatTest(TestCase):
 
   def test_interacting_with_player_not_in_combat_in_single_combat_should_stay_aggro(self):
     # The player is in a singles zone and in combat with nothing
-    self.npc.is_in_multicombat = Mock(return_value=False)
+    self.player.is_in_multicombat = Mock(return_value=False)
     self.npc.perform_interact()
 
     self.assertEqual(self.npc.mode, NpcMode.PLAYERFOLLOW)
@@ -250,7 +295,7 @@ class SingleCombatTest(TestCase):
 
   def test_interacting_with_player_in_combat_in_multi_combat_should_stay_aggro(self):
     # The player is in multi and in combat with another npc
-    self.npc.is_in_multicombat = Mock(return_value=True)
+    self.player.is_in_multicombat = Mock(return_value=True)
     npc2 = self.npc_registry.create_npc(0, -1, StubWalkabilityStrategy())
     self.player.in_combat_with = npc2
 
@@ -261,7 +306,7 @@ class SingleCombatTest(TestCase):
 
   def test_interacting_with_player_in_combat_with_self_in_multi_combat_should_stay_aggro(self):
     # The player is in multi and in combat with this Npc
-    self.npc.is_in_multicombat = Mock(return_value=True)
+    self.player.is_in_multicombat = Mock(return_value=True)
     self.player.in_combat_with = self.npc
 
     self.npc.perform_interact()
@@ -271,7 +316,7 @@ class SingleCombatTest(TestCase):
 
   def test_interacting_with_player_not_in_combat_in_multi_combat_should_stay_aggro(self):
     # The player is in multi and in combat with nothing
-    self.npc.is_in_multicombat = Mock(return_value=True)
+    self.player.is_in_multicombat = Mock(return_value=True)
 
     self.npc.perform_interact()
 

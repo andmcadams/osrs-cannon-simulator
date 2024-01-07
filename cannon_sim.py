@@ -243,6 +243,12 @@ class Npc:
     self.respawn()
     self.times_died = 0
 
+    # TODO: This feels kinda hacky
+    self.map_registry = walkability_strategy.map_registry
+
+  def is_in_multicombat(self):
+    self.map_registry.is_in_multicombat(self.coordinate)
+
   def is_dead(self):
     return self._is_dead
 
@@ -260,6 +266,9 @@ class Npc:
     self._mode = NpcMode.WANDER
     self.set_interaction(None)
 
+    # Extremely naive kill credit for simming with single player doing damage
+    self.kill_credit_player = None
+
   def die(self):
     self._is_dead = True
     self.hitpoints = 0
@@ -268,6 +277,8 @@ class Npc:
     self.queue = []
     self.times_died += 1
     self.set_interaction(None)
+    if self.kill_credit_player:
+      self.kill_credit_player.give_loot(self)
 
   def perform_timers(self):
     # Respawn timer
@@ -291,6 +302,7 @@ class Npc:
   def take_damage(self, amount, attacker):
     damage_taken = min(amount, self.hitpoints)
     self.hitpoints -= damage_taken
+    self.kill_credit_player = attacker
     if self.interacting_with is None:
       self.set_interaction(attacker)
     
@@ -446,8 +458,15 @@ class Npc:
   def perform_interact(self):
     if self.is_dead():
       return
-    # TODO: Target the player
-    pass
+
+    # TODO: This only works for 1x1 melee
+    # If the Npc approaches a player in combat, it daeaggros
+    if self.interacting_with:
+      player = self.interacting_with
+      if abs(self.coordinate[0] - player.coordinate[0]) == 1 or abs(self.coordinate[1] - player.coordinate[1]) == 1:
+        if not player.is_in_multicombat() and player.is_in_combat() and not player.is_in_combat_with(self):
+          self.set_interaction(None)
+          self.mode = NpcMode.WANDER
 
   @property
   def x(self):
@@ -567,6 +586,7 @@ class CannonHuntStrategy(HuntStrategy):
     return True
   
   def get_target(self, cannon):
+    # TODO: Edge case - Cannon would have targeted an npc in singles, but the player is in combat. If an npc is in multi a few tiles farther from the center, will it cannon?
     origin = cannon.coordinate
     direction = cannon.direction
     # Cook code ahead
@@ -586,8 +606,9 @@ class CannonHuntStrategy(HuntStrategy):
           chunk = (center_chunk[0] + x_chunk_offset, center_chunk[1] + y_chunk_offset)
           for npc in self.npc_registry.get_living_npcs_in_chunk(chunk[0], chunk[1]):
             if npc.is_attackable():
-              if cheb(center, npc.coordinate) <= cannon_ranges[i]:
-                npcs_in_range.append(npc)
+              if npc.is_in_multicombat() or not cannon.player.is_in_combat():
+                if cheb(center, npc.coordinate) <= cannon_ranges[i]:
+                  npcs_in_range.append(npc)
       npcs_in_range.sort(key=lambda npc: euclidean(center, npc.coordinate))
 
       if len(npcs_in_range) > 0:
@@ -658,10 +679,24 @@ class Player:
     self._x = coordinate[0] 
     self._y = coordinate[1] 
     self._cannon_strategy = cannon_strategy
+    # TODO: This flag should probably go away after not being in combat for some amount of time
+    # but it isn't essential to this sim since players can't move
+    self.in_combat_with = None
+
+    # TODO: This feels hacky
+    self.map_registry = cannon_strategy.map_registry
 
   def perform_timers(self):
     if self.cannon():
       self.cannon().process_tick()
+
+  def give_loot(self, npc):
+    self.in_combat_with = None
+
+  def take_damage(self, amount, attacker):
+    # Naive implementation in order to assign in_combat_with
+    # This simulation does not care about player hp
+    self.in_combat_with = attacker
 
   def place_cannon(self, coordinate: Tuple[int, int]):
     self._cannon = Cannon(coordinate[0], coordinate[1], self, self._cannon_strategy)
@@ -687,12 +722,25 @@ class Player:
   def y(self):
     return self._y
 
+  def is_in_combat(self):
+    return self.in_combat_with is not None
+
+  def is_in_combat_with(self, entity):
+    return self.in_combat_with == entity
+
+  def is_in_multicombat(self):
+    self.map_registry.is_in_multicombat(self.coordinate)
+
 class MapRegistry:
   def __init__(self, map_config):
     self.map_config = map_config
 
   def get_objs(self, coordinate):
     return self.map_config.get(coordinate[0], {}).get(coordinate[1], {})
+
+  def is_in_multicombat(self, coordinate):
+    # TODO: Implement method
+    return False
 
 if __name__ == '__main__':
   c = (2962, 3382)
