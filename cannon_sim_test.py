@@ -19,6 +19,14 @@ def is_west_tile_walkable(strategy, coord):
 def is_northwest_tile_walkable(strategy, coord):
   return strategy.is_walkable_tile(coord, (coord[0] - 1, coord[1] + 1))
 
+class StubWalkabilityStrategy(WalkabilityStrategy):
+  def __init__(self):
+    self.map_registry = None
+
+class StubHuntStrategy(HuntStrategy):
+  def __init__(self):
+    self.map_registry = None
+
 class SimpleWalkabilityStrategyTest(TestCase):
 
   def test_is_walkable_tile_should_block_left_mask(self):
@@ -243,14 +251,6 @@ class CannonHuntStrategyTest(TestCase):
 
 
     self.assertTrue(strat.get_target(cannon) == npc2)
-
-class StubWalkabilityStrategy(WalkabilityStrategy):
-  def __init__(self):
-    self.map_registry = None
-
-class StubHuntStrategy(HuntStrategy):
-  def __init__(self):
-    self.map_registry = None
 
 class NpcInteractionTest(TestCase):
 
