@@ -1,4 +1,5 @@
-from unittest import TestCase, main, skip
+from unittest import TestCase, main
+from unittest.mock import Mock
 from cannon_sim import *
 
 def is_north_tile_walkable(strategy, coord):
@@ -126,35 +127,34 @@ class SimpleWalkabilityStrategyTest(TestCase):
 
 class NpcRegistryTest(TestCase):
 
+  def setUp(self):
+    self.npc_registry = NpcRegistry()
+    self.walkability_strategy = WalkabilityStrategy(MapRegistry({}), self.npc_registry, PlayerRegistry())
+
   def test_registry_should_be_empty_initially(self):
     self.assertTrue(len(NpcRegistry().registered_npcs) == 0)
 
   def test_create_npc_should_add_to_registry(self):
-    registry = NpcRegistry()
-    registry.create_npc(0, 0, None)
-    self.assertTrue(len(registry.registered_npcs) == 1)
+    self.npc_registry.create_npc(0, 0, self.walkability_strategy)
+    self.assertTrue(len(self.npc_registry.registered_npcs) == 1)
 
   def test_create_npc_should_return_npc(self):
-    registry = NpcRegistry()
-    npc = registry.create_npc(0, 0, None)
+    npc = self.npc_registry.create_npc(0, 0, self.walkability_strategy)
     self.assertEqual(npc.__class__, Npc)
 
   def test_create_npc_should_increment_slot_indices(self):
-    registry = NpcRegistry()
-    npc = registry.create_npc(0, 0, None)
-    npc_2 = registry.create_npc(0, 0, None)
+    npc = self.npc_registry.create_npc(0, 0, self.walkability_strategy)
+    npc_2 = self.npc_registry.create_npc(0, 0, self.walkability_strategy)
     self.assertEqual(npc.slot_index, 0)
     self.assertEqual(npc_2.slot_index, 1)
 
   def test_create_npc_should_add_them_to_chunk(self):
-    registry = NpcRegistry()
-    npc = registry.create_npc(0, 0, None)
-    self.assertListEqual(list(registry.get_npcs_in_chunk(0, 0)), [npc])
+    npc = self.npc_registry.create_npc(0, 0, self.walkability_strategy)
+    self.assertListEqual(list(self.npc_registry.get_npcs_in_chunk(0, 0)), [npc])
 
   def test_create_npc_should_make_them_alive(self):
-    registry = NpcRegistry()
-    npc = registry.create_npc(0, 0, None)
-    self.assertListEqual(list(registry.get_living_npcs_in_chunk(0, 0)), [npc])
+    npc = self.npc_registry.create_npc(0, 0, self.walkability_strategy)
+    self.assertListEqual(list(self.npc_registry.get_living_npcs_in_chunk(0, 0)), [npc])
 
 class CannonHuntStrategyTest(TestCase):
   # Construct a bunch of real life test cases to make sure they work as expected
@@ -199,12 +199,136 @@ class CannonHuntStrategyTest(TestCase):
     for i in range(8):
       for coord in self.get_possible_cannon_coords(cannon.direction):
         npc_registry.reset()
-        npc = npc_registry.create_npc(coord[0], coord[1], None)
+        npc = npc_registry.create_npc(coord[0], coord[1], WalkabilityStrategy(map_registry, npc_registry, player_registry))
         self.assertEqual(strat.get_target(cannon).slot_index, npc.slot_index)
       cannon.turn()
 
   def test_get_target_should_not_go_through_walls(self):
     pass
+
+class SingleCombatTest(TestCase):
+
+  def test_interacting_with_player_in_combat_in_single_combat_should_deaggro(self):
+    player_registry = PlayerRegistry()
+    player = player_registry.create_player((0, 0), None)
+    map_registry = MapRegistry({})
+    
+    map_registry.is_in_multicombat = Mock(return_value=False)
+
+    npc_registry = NpcRegistry()
+    npc = npc_registry.create_npc(0, 1, SimpleWalkabilityStrategy(map_registry, npc_registry, player_registry))
+    npc2 = npc_registry.create_npc(0, -1, SimpleWalkabilityStrategy(map_registry, npc_registry, player_registry))
+
+    # The player is in a singles zone and in combat with another Npc
+    player.in_combat_with = npc2
+
+    # Create an Npc focused on the player, standing next to the player
+    npc.set_interaction(player)
+    npc.mode = NpcMode.PLAYERFOLLOW
+    npc.perform_interact()
+
+    self.assertEqual(npc.mode, NpcMode.WANDER)
+    self.assertIsNone(npc.interacting_with)
+
+  def test_interacting_with_player_in_combat_with_self_in_single_combat_should_stay_aggro(self):
+    player_registry = PlayerRegistry()
+    player = player_registry.create_player((0, 0), None)
+    map_registry = MapRegistry({})
+    
+    map_registry.is_in_multicombat = Mock(return_value=False)
+
+    npc_registry = NpcRegistry()
+    npc = npc_registry.create_npc(0, 1, SimpleWalkabilityStrategy(map_registry, npc_registry, player_registry))
+
+    # The player is in a singles zone and in combat with another Npc
+    player.in_combat_with = npc
+
+    # Create an Npc focused on the player, standing next to the player
+    npc.set_interaction(player)
+    npc.mode = NpcMode.PLAYERFOLLOW
+    npc.perform_interact()
+
+    self.assertEqual(npc.mode, NpcMode.PLAYERFOLLOW)
+    self.assertEqual(npc.interacting_with, player)
+
+  def test_interacting_with_player_not_in_combat_in_single_combat_should_stay_aggro(self):
+    player_registry = PlayerRegistry()
+    player = player_registry.create_player((0, 0), None)
+    map_registry = MapRegistry({})
+    
+    map_registry.is_in_multicombat = Mock(return_value=False)
+
+    npc_registry = NpcRegistry()
+    npc = npc_registry.create_npc(0, 1, SimpleWalkabilityStrategy(map_registry, npc_registry, player_registry))
+
+    # Create an Npc focused on the player, standing next to the player
+    npc.set_interaction(player)
+    npc.mode = NpcMode.PLAYERFOLLOW
+    npc.perform_interact()
+
+    self.assertEqual(npc.mode, NpcMode.PLAYERFOLLOW)
+    self.assertEqual(npc.interacting_with, player)
+
+  def test_interacting_with_player_in_combat_in_multi_combat_should_stay_aggro(self):
+    player_registry = PlayerRegistry()
+    player = player_registry.create_player((0, 0), None)
+    map_registry = MapRegistry({})
+    
+    map_registry.is_in_multicombat = Mock(return_value=True)
+
+    npc_registry = NpcRegistry()
+    npc = npc_registry.create_npc(0, 1, SimpleWalkabilityStrategy(map_registry, npc_registry, player_registry))
+    npc2 = npc_registry.create_npc(0, -1, SimpleWalkabilityStrategy(map_registry, npc_registry, player_registry))
+
+    # The player is in a singles zone and in combat with another Npc
+    player.in_combat_with = npc2
+
+    # Create an Npc focused on the player, standing next to the player
+    npc.set_interaction(player)
+    npc.mode = NpcMode.PLAYERFOLLOW
+    npc.perform_interact()
+
+    self.assertEqual(npc.mode, NpcMode.PLAYERFOLLOW)
+    self.assertEqual(npc.interacting_with, player)
+
+  def test_interacting_with_player_in_combat_with_self_in_multi_combat_should_stay_aggro(self):
+    player_registry = PlayerRegistry()
+    player = player_registry.create_player((0, 0), None)
+    map_registry = MapRegistry({})
+    
+    map_registry.is_in_multicombat = Mock(return_value=True)
+
+    npc_registry = NpcRegistry()
+    npc = npc_registry.create_npc(0, 1, SimpleWalkabilityStrategy(map_registry, npc_registry, player_registry))
+
+    # The player is in a singles zone and in combat with another Npc
+    player.in_combat_with = npc
+
+    # Create an Npc focused on the player, standing next to the player
+    npc.set_interaction(player)
+    npc.mode = NpcMode.PLAYERFOLLOW
+    npc.perform_interact()
+
+    self.assertEqual(npc.mode, NpcMode.PLAYERFOLLOW)
+    self.assertEqual(npc.interacting_with, player)
+
+  def test_interacting_with_player_not_in_combat_in_multi_combat_should_stay_aggro(self):
+    player_registry = PlayerRegistry()
+    player = player_registry.create_player((0, 0), None)
+    map_registry = MapRegistry({})
+    
+    map_registry.is_in_multicombat = Mock(return_value=True)
+
+    npc_registry = NpcRegistry()
+    npc = npc_registry.create_npc(0, 1, SimpleWalkabilityStrategy(map_registry, npc_registry, player_registry))
+
+    # Create an Npc focused on the player, standing next to the player
+    npc.set_interaction(player)
+    npc.mode = NpcMode.PLAYERFOLLOW
+    npc.perform_interact()
+
+    self.assertEqual(npc.mode, NpcMode.PLAYERFOLLOW)
+    self.assertEqual(npc.interacting_with, player)
 
 if __name__ == '__main__':
   main()
