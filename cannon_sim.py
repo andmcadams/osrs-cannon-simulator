@@ -3,7 +3,6 @@ import random
 from create_map import Mask, create_map_config
 from typing import Tuple, Union
 from create_map import relevant_npcs
-# TODO: Support nxn npcs
 # TODO: Support tiles that block (ex water, dont think i need to support flying npcs)
 # TODO: Support ranged/mage/long melee npcs
 
@@ -78,7 +77,7 @@ class WalkabilityStrategy:
     self.npc_registry = npc_registry
     self.player_registry = player_registry
 
-  def is_walkable_tile(self, old_coord, new_coord):
+  def is_walkable_tile(self, old_coord, new_coord, npc):
     raise NotImplementedError
 
 class SimpleWalkabilityStrategy(WalkabilityStrategy):
@@ -106,38 +105,59 @@ class SimpleWalkabilityStrategy(WalkabilityStrategy):
     return bool(blockers & moving)
 
 
-  def _are_objects_blocking(self, old_coord, new_coord):
+  def _are_objects_blocking(self, old_coord, new_coord, moving_npc):
     direction = (new_coord[0] - old_coord[0], new_coord[1] - old_coord[1])
-    flags = self.map_registry.get_objs(old_coord).get('movement_flags', 0)
-    if self._blocks_direction(direction, flags):
-      return True
-    if direction[0] != 0 and direction[1] != 0:
-      # If trying to go diagonally, check both components
-      # This is probably worth precomputing with flags
-      if self.is_walkable_tile(old_coord, (old_coord[0] + direction[0], old_coord[1])) is False:
-        return True
-      if self.is_walkable_tile((old_coord[0] + direction[0], old_coord[1]), new_coord) is False:
-        return True
-      if self.is_walkable_tile(old_coord, (old_coord[0], old_coord[1] + direction[1])) is False:
-        return True
-      if self.is_walkable_tile((old_coord[0], old_coord[1] + direction[1]), new_coord) is False:
-        return True
+
+    # Get the direction. For each tile in our square, check.
+    # TODO: Is this actually what happens? Or does it only check squares it does not currently occupy?
+    for i in range(moving_npc.size):
+      for j in range(moving_npc.size):
+        # Get coords for the tile we are looking at (matters for > 1x1)
+        old_x, old_y = (old_coord[0] + i, old_coord[1] + j)
+        new_x, new_y = (new_coord[0] + i, new_coord[1] + j)
+
+        flags = self.map_registry.get_objs((old_x, old_y)).get('movement_flags', 0)
+        if self._blocks_direction(direction, flags):
+          return True
+        if direction[0] != 0 and direction[1] != 0:
+          # If trying to go diagonally, check both components
+          # This is probably worth precomputing with flags
+          # TODO: Hate that this is recursive, even if these are all definitely base cases
+          if self.is_walkable_tile((old_x, old_y), (old_x + direction[0], old_y), moving_npc) is False:
+            return True
+          if self.is_walkable_tile((old_x + direction[0], old_y), (new_x, new_y), moving_npc) is False:
+            return True
+          if self.is_walkable_tile((old_x, old_y), (old_x, old_y + direction[1]), moving_npc) is False:
+            return True
+          if self.is_walkable_tile((old_x, old_y + direction[1]), (new_x, new_y), moving_npc) is False:
+            return True
     return False
 
-  def is_walkable_tile(self, old_coord, new_coord):
+  def is_walkable_tile(self, old_coord, new_coord, moving_npc):
     # Not walkable if there is an npc there or object that restricts movement
-    for npc in self.npc_registry.get_living_npcs_in_chunk_by_abs_coordinate(new_coord):
-      # TODO: Allow if the transparent flag is set
-      # TODO: Should this account for the Npc trying to walk on itself?
-      if npc.coordinate == new_coord:
-        return False
+    # Check relevant tiles for blocking npcs
+    # TODO: This should be refactored, checking other tiles walkability in _are_objects_blocking is weird
+    # Can probably be optimized if thats pulled out.
+    for i in range(moving_npc.size):
+      for j in range(moving_npc.size):
+        for npc in self.npc_registry.get_living_npcs_in_tile(new_coord[0] + i, new_coord[1] + j):
+          # If collides with another npc return false
+          # TODO: Allow if the transparent flag is set
+          # TODO: Should this account for the Npc trying to walk on itself?
+          if npc == moving_npc:
+            continue
+          if npc.collides_with(new_coord, moving_npc.size):
+            return False
+        for player in self.player_registry.registered_players:
+          if player.coordinate == (new_coord[0] + i, new_coord[1] + j):
+            return False
 
-    # Is there something on the current tile blocking me?
-    if self._are_objects_blocking(old_coord, new_coord):
+    # Is there something on the current tiles blocking me?
+    if self._are_objects_blocking(old_coord, new_coord, moving_npc):
       return False
 
-    # Is there something on the new tile blocking me?
-    if self._are_objects_blocking(new_coord, old_coord):
+    # Is there something on the new tiles blocking me?
+    if self._are_objects_blocking(new_coord, old_coord, moving_npc):
       return False
 
     return True
@@ -152,6 +172,7 @@ class NpcRegistry:
     self._npcs = []
     self.current_slot = 0
     self.npc_chunk_lookup = defaultdict(lambda: defaultdict(dict))
+    self.npc_tile_lookup = defaultdict(lambda: defaultdict(dict))
 
   def reset(self):
     self._initialize_state()
@@ -166,11 +187,18 @@ class NpcRegistry:
     # Add them to the chunk for tracking
     chunk = self._get_chunk(x, y)
     self._add_to_chunk(npc, chunk[0], chunk[1])
+    self._add_to_tile(npc, x, y)
 
     # Add to registered npc list
     self._npcs.append(npc)
 
     return npc
+
+  def get_npcs_in_tile(self, tile_x, tile_y):
+    return self.npc_tile_lookup[tile_x][tile_y].values()
+
+  def get_living_npcs_in_tile(self, tile_x, tile_y):
+    return [n for n in self.npc_tile_lookup[tile_x][tile_y].values() if n.is_dead() is False]
 
   def get_npcs_in_chunk(self, chunk_x, chunk_y):
     return self.npc_chunk_lookup[chunk_x][chunk_y].values()
@@ -178,11 +206,11 @@ class NpcRegistry:
   def get_living_npcs_in_chunk(self, chunk_x, chunk_y):
     return [n for n in self.get_npcs_in_chunk(chunk_x, chunk_y) if n.is_dead() is False]
 
-  def get_living_npcs_in_chunk_by_abs_coordinate(self, coordinate):
-    chunk = self._get_chunk(coordinate[0], coordinate[1])
-    return self.get_living_npcs_in_chunk(chunk[0], chunk[1])
-
   def update_npc_location(self, npc, old_coord, new_coord):
+
+    self._remove_from_tile(npc, old_coord[0], old_coord[1])
+    self._add_to_tile(npc, new_coord[0], new_coord[1])
+
     old_chunk = self._get_chunk(old_coord[0], old_coord[1])
     new_chunk = self._get_chunk(new_coord[0], new_coord[1])
     if new_chunk != old_chunk:
@@ -198,6 +226,18 @@ class NpcRegistry:
     if npc_id in self.SKELETON_IDS:
       return {'id': npc_id,  'max_range': 10, 'wander_range': 8, 'hitpoints': 29, 'combat_level': 22, 'name': 'Skeleton'}
     return {'id': npc_id, 'combat_level': 0 }
+
+  def _add_to_tile(self, npc, tile_x, tile_y):
+    size = npc.size
+    for i in range(size):
+      for j in range(size):
+        self.npc_tile_lookup[tile_x + i][tile_y + j][npc.slot_index] = npc
+
+  def _remove_from_tile(self, npc, tile_x, tile_y):
+    size = npc.size
+    for i in range(size):
+      for j in range(size):
+        self.npc_tile_lookup[tile_x + i][tile_y + j].pop(npc.slot_index, None)
 
   def _add_to_chunk(self, npc, chunk_x, chunk_y):
     self.npc_chunk_lookup[chunk_x][chunk_y][npc.slot_index] = npc
@@ -230,7 +270,6 @@ class NpcMovement:
     self.destination_tile = destination_tile
     self.successful = successful
 
-
 class Npc:
   def __init__(self, slot_index: int, x: int, y: int, npc_registry, walkability_strategy, opts={}):
     self.queue = []
@@ -249,11 +288,24 @@ class Npc:
     self.respawn_time = opts.get('respawn_time', 50) # 50 tick respawn time, will be dependent on monster
     self.wanderrange = opts.get('wander_range', 5) # No clue what the default is here
     self.maxrange = opts.get('max_range', 8) # No clue what the default is here
+    self.size = opts.get('size', 1)
     self.respawn()
     self.times_died = 0
 
     # TODO: This feels kinda hacky
     self.map_registry = walkability_strategy.map_registry
+
+  def collides_with(self, bottom_left_coordinate, size):
+    # Keep in mind coordinate is the Npc's southwest tile if larger than 1x1
+    # SW and NE coords of other Npc
+    x, y = bottom_left_coordinate
+    x2, y2 = (x + (size - 1), y + (size - 1))
+
+    # SW and NE coords of this Npc
+    sw_x, sw_y = self.coordinate
+    ne_x, ne_y = (sw_x + (self.size - 1), sw_y + (self.size - 1))
+
+    return (x <= sw_x <= x2 or x <= ne_x <= x2) and (y <= sw_y <= y2 or y <= ne_y <= y2)
 
   def is_in_multicombat(self):
     self.map_registry.is_in_multicombat(self.coordinate)
@@ -448,13 +500,15 @@ class Npc:
 
     new_coordinate = None
     # Attempt to move to the destination tile
-    if self.walkability_strategy.is_walkable_tile(self.coordinate, (self.x + dx, self.y + dy)):
+    if self.walkability_strategy.is_walkable_tile(self.coordinate, (self.x + dx, self.y + dy), self):
       new_coordinate = (self.x + dx, self.y + dy)
     elif dx != 0 and dy != 0:
+      # TODO: This can probably all be done in one go in a walkability strategy. Return (T, _, _) or (F, T/F, T/F)
+      # Alternatively find some way to memoize the calls
       # If we were trying to go diagonally, but cant, try E/W followed by N/S
-      if self.walkability_strategy.is_walkable_tile(self.coordinate, (self.x + dx, self.y)):
+      if self.walkability_strategy.is_walkable_tile(self.coordinate, (self.x + dx, self.y), self):
         new_coordinate =  (self.x + dx, self.y)
-      elif self.walkability_strategy.is_walkable_tile(self.coordinate, (self.x, self.y + dy)):
+      elif self.walkability_strategy.is_walkable_tile(self.coordinate, (self.x, self.y + dy), self):
         new_coordinate =  (self.x, self.y + dy)
 
     if DEBUG_NPC_PATHING:
