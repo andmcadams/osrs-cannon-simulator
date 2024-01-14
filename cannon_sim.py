@@ -5,6 +5,7 @@ from typing import Tuple, Union
 from create_map import relevant_npcs
 # TODO: Support tiles that block (ex water, dont think i need to support flying npcs)
 # TODO: Support ranged/mage/long melee npcs
+# TODO: Support "transparency"
 
 DEBUG = False
 # Keep track of Npc movements, can be very memory intensive over long sims
@@ -181,8 +182,8 @@ class NpcRegistry:
   def registered_npcs(self):
     return self._npcs
 
-  def create_npc(self, x, y, walkability_strategy, opts={}):
-    npc = Npc(self._next_slot(), x, y, self, walkability_strategy, opts)
+  def create_npc(self, x, y, walkability_strategy, hunt_strategy, opts={}):
+    npc = Npc(self._next_slot(), x, y, self, walkability_strategy, hunt_strategy, opts)
 
     # Add them to the chunk for tracking
     chunk = self._get_chunk(x, y)
@@ -271,7 +272,7 @@ class NpcMovement:
     self.successful = successful
 
 class Npc:
-  def __init__(self, slot_index: int, x: int, y: int, npc_registry, walkability_strategy, opts={}):
+  def __init__(self, slot_index: int, x: int, y: int, npc_registry, walkability_strategy, hunt_strategy=None, opts={}):
     self.queue = []
     self.slot_index = slot_index
     self._x = x
@@ -289,6 +290,8 @@ class Npc:
     self.wanderrange = opts.get('wander_range', 5) # No clue what the default is here
     self.maxrange = opts.get('max_range', 8) # No clue what the default is here
     self.size = opts.get('size', 1)
+    self.attack_range = opts.get('attack_range', 1)
+    self.hunt_strategy = hunt_strategy
     self.respawn()
     self.times_died = 0
 
@@ -368,7 +371,7 @@ class Npc:
       self.set_interaction(attacker)
     
     if self.interacting_with == attacker:
-      if self.can_attack(attacker):
+      if self.can_follow(attacker):
         self.mode = NpcMode.PLAYERFOLLOW
       else:
         self.mode = NpcMode.PLAYERESCAPE
@@ -383,19 +386,33 @@ class Npc:
       debug(f'Npc {self.slot_index} interacting with new entity {entity}')
     self.interacting_with = entity
 
-  def can_attack(self, player: 'Player'):
+  def can_follow(self, player):
     # MELEE (non halberd)
-    dist_x = player.coordinate[0] - self.respawn_coordinate[0]
-    dist_y = player.coordinate[1] - self.respawn_coordinate[1]
-    if dist_x >= dist_y:
-      dist_x -= 1
-    else:
-      dist_y -= 1
-    if max(dist_x, dist_y) <= self.maxrange:
-      return True
+    # Can I in any world (without obstacles) attack?
 
-    # TODO: Add case for range/mage/long melee
+    x, y = self.respawn_coordinate
+    tiles = [(x + i, y + j) for i in range(self.size) for j in range(self.size)]
+    for tile in tiles:
+      dist_x = abs(player.coordinate[0] - tile[0])
+      dist_y = abs(player.coordinate[1] - tile[1])
+      if dist_x >= dist_y:
+        dist_x -= 1
+      else:
+        dist_y -= 1
+      if max(dist_x, dist_y) <= self.maxrange:
+        return True
 
+    return False
+
+  def can_attack(self, player_coordinate):
+    # This only works for regular melee
+    x, y = player_coordinate
+    if self.collides_with(player_coordinate, 1):
+      return False
+    tiles = [(self.coordinate[0] + i, self.coordinate[1] + j) for i in range(self.size) for j in range(self.size)]
+    for tile in tiles:
+      if abs(tile[0] - x) == 1 or abs(tile[1] - y) == 1:
+        return True
     return False
 
   @property
@@ -456,13 +473,19 @@ class Npc:
     east_tile = (x+1, y)
     west_tile = (x-1, y)
 
-    # If they are the same coordinate, choose a random tile
-    if cheb(self.interacting_with.coordinate, self.coordinate) == 0:
+    # If we have LOS and can attack, set dest tile to this
+    if self.hunt_strategy.has_line_of_sight(self.coordinate, self.interacting_with.coordinate) and self.can_attack(self.interacting_with.coordinate):
+      self.destination_tile = self.coordinate
+      return
+
+    # If the player is on top of the Npc, move randomly
+    if self.collides_with(self.interacting_with.coordinate, 1):
       direction = 1 if random.random() < 0.5 else -1
       if random.random() < 0.5:
-        (x+direction, y)
+        self.destination_tile = (x+direction, y)
       else:
-        (x, y+direction)
+        self.destination_tile = (x, y+direction)
+      return
 
     north_tile_distance = cheb(north_tile, self.coordinate)
     south_tile_distance = cheb(south_tile, self.coordinate)
@@ -522,11 +545,10 @@ class Npc:
     if self.is_dead():
       return
 
-    # TODO: This only works for 1x1 melee
     # If the Npc approaches a player in combat, it daeaggros
     if self.interacting_with:
       player = self.interacting_with
-      if abs(self.coordinate[0] - player.coordinate[0]) == 1 or abs(self.coordinate[1] - player.coordinate[1]) == 1:
+      if self.can_attack(player.coordinate):
         if not player.is_in_multicombat() and player.is_in_combat() and not player.is_in_combat_with(self):
           self.set_interaction(None)
           self.mode = NpcMode.WANDER
@@ -565,9 +587,9 @@ class Npc:
       self._destination_tile = coord
 
 class HuntStrategy:
-  def __init__(self, npc_registry, map_registry, player_registry):
-    self.npc_registry = npc_registry
+  def __init__(self, map_registry, npc_registry, player_registry):
     self.map_registry = map_registry
+    self.npc_registry = npc_registry
     self.player_registry = player_registry
 
   def get_target(self, hunter):
@@ -640,6 +662,9 @@ class HuntStrategy:
           return False
     return True
 
+class SimpleHuntStrategy(HuntStrategy):
+  def get_destination_tile(self):
+    pass
 
 class CannonHuntStrategy(HuntStrategy):
   def has_line_of_sight(self, cannon_center, area_center, npc_coordinate):
@@ -849,11 +874,13 @@ if __name__ == '__main__':
   npc_structs = relevant_npcs(c)
   npcs = []
   strategy = SimpleWalkabilityStrategy(map_registry, npc_registry, player_registry)
+  hunt_strategy = SimpleHuntStrategy(map_registry, npc_registry, player_registry)
   for s in npc_structs:
-    npc_registry.create_npc(s['x'], s['y'], strategy, opts=npc_registry.get_npc_stats(s))
+    if s['id'] in npc_registry.SKELETON_IDS:
+      npc_registry.create_npc(s['x'], s['y'], strategy, hunt_strategy, opts=npc_registry.get_npc_stats(s))
 
   # Populate player_registry
-  player = player_registry.create_player(c, CannonHuntStrategy(npc_registry, map_registry, player_registry))
+  player = player_registry.create_player(c, CannonHuntStrategy(map_registry, npc_registry, player_registry))
   player.place_cannon((3378, 9746))
 
   # Create and run engine
