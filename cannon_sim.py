@@ -287,8 +287,8 @@ class Npc:
     self.max_hitpoints = opts.get('hitpoints', 1)
     self._combat_level = opts.get('combat_level', 1)
     self.respawn_time = opts.get('respawn_time', 50) # 50 tick respawn time, will be dependent on monster
-    self.wanderrange = opts.get('wander_range', 5) # No clue what the default is here
-    self.maxrange = opts.get('max_range', 8) # No clue what the default is here
+    self.wanderrange = opts.get('wander_range', 5)
+    self.maxrange = opts.get('max_range', 7)
     self.size = opts.get('size', 1)
     self.attack_range = opts.get('attack_range', 1)
     self.hunt_strategy = hunt_strategy
@@ -548,7 +548,9 @@ class Npc:
     # If the Npc approaches a player in combat, it daeaggros
     if self.interacting_with:
       player = self.interacting_with
-      if self.can_attack(player.coordinate):
+      if cheb(self.coordinate, player.coordinate) > 25:
+        self.mode = NpcMode.WANDER
+      elif self.can_attack(player.coordinate):
         if not player.is_in_multicombat() and player.is_in_combat() and not player.is_in_combat_with(self):
           self.set_interaction(None)
           self.mode = NpcMode.WANDER
