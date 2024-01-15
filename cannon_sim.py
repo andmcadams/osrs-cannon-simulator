@@ -3,10 +3,21 @@ import random
 from create_map import Mask, create_map_config
 from typing import Tuple, Union
 from create_map import relevant_npcs
+# For champion challenge
+# TODO: Support aggression/huntrange
+# TODO: Accuracy checks for the cannon
 # TODO: Support tiles that block (ex water, dont think i need to support flying npcs)
-# TODO: Support ranged/mage/long melee npcs
-# TODO: Support "transparency"
+# TODO: Support multiple planes, not necessarily at the same time (lesser demons for ex)
 
+# For other
+# TODO: Refactor a lot of this mess
+# TODO: Build test suite of actual ingame examples
+# TODO: Refactor debug options with some sort of wrapper around npcs/players
+# TODO: Support ranged/mage/long melee npcs
+# TODO: Support "transparency", this is probably minor when the player doesn't move
+# TODO: Maybe allow simple player movement to restock cannonballs?
+
+# TODO: Horrific way of debugging should be removed
 DEBUG = False
 # Keep track of Npc movements, can be very memory intensive over long sims
 DEBUG_NPC_PATHING = False
