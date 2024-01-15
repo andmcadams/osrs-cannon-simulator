@@ -25,11 +25,29 @@ class Mask:
   BOTTOM_RIGHT = 128
   OBJECT = 256
 
+class TileFlagMask:
+  BLOCKING = 1
+  ROOF = 4
+
+def tile_def_for_chunk(chunk_to_load):
+  tile_file_path = Path(f'./out/data_osrs/tiles/{chunk_to_load[0]}_{chunk_to_load[1]}.json')
+  tile_mapping = defaultdict(lambda: defaultdict(int))
+
+  if tile_file_path.exists():
+    with tile_file_path.open() as tile_file:
+      tiles = json.load(tile_file)['data']
+      for i in range(64):
+        for j in range(64):
+          settings = tiles[64*i + j]['settings']
+          settings = 0 if settings is None else settings
+          tile_mapping[i][j] = settings
+  return tile_mapping
+
 def create_map_config(coordinate):
   center_chunk = (coordinate[0]//64, coordinate[1]//64)
   mapping = defaultdict(lambda: defaultdict(dict))
-  for i in [-1, 0, 1]:
-    for j in [-1, 0, 1]:
+  for i in [0, 1]:
+    for j in [0, 1]:
       chunk_to_load = (center_chunk[0] + i, center_chunk[1] + j)
       file_path = Path(f'./output_configs/m_{chunk_to_load[0]}_{chunk_to_load[1]}.json')
       if file_path.exists():
@@ -77,6 +95,13 @@ def create_map_config(coordinate):
               for w in range(dim_x):
                 for z in range(dim_y):
                   mapping[chunk_to_load[0]*64 + loc['x'] + w][chunk_to_load[1]*64 + loc['y'] + z] = result
+
+      tile_defs = tile_def_for_chunk(chunk_to_load)
+      for w in range(64):
+        for z in range(64):
+          if tile_defs[w][z] != 0:
+            mapping[chunk_to_load[0]*64 + w][chunk_to_load[1]*64 + z]['tile_flags'] = tile_defs[w][z]
+
   return mapping
 
 def relevant_npcs(coordinate):
