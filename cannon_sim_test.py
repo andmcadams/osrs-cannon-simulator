@@ -253,6 +253,21 @@ class LargeMonsterTest(TestCase):
       player = player_registry.create_player((x, y), StubHuntStrategy())
       self.assertFalse(npc.can_follow(player))
 
+  def test_perform_move_should_path_west_when_southeast(self):
+    map_registry = MapRegistry({})
+    map_registry.get_objs = Mock(return_value={})
+    npc_registry = NpcRegistry()
+    player_registry = PlayerRegistry()
+    strategy = SimpleWalkabilityStrategy(map_registry, npc_registry, player_registry)
+    hunt_strategy = HuntStrategy(map_registry, npc_registry, player_registry)
+    npc = npc_registry.create_npc(1, -2, strategy, hunt_strategy, opts={'size': 2})
+
+    player = player_registry.create_player((0, 0), StubHuntStrategy())
+    npc.set_interaction(player)
+    npc.mode = NpcMode.PLAYERFOLLOW
+    npc.perform_move()
+    self.assertEqual(npc.coordinate, (0, -2))
+
 class NpcRegistryTest(TestCase):
 
   def setUp(self):

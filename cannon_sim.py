@@ -411,7 +411,7 @@ class Npc:
       return False
     tiles = [(self.coordinate[0] + i, self.coordinate[1] + j) for i in range(self.size) for j in range(self.size)]
     for tile in tiles:
-      if abs(tile[0] - x) == 1 or abs(tile[1] - y) == 1:
+      if (abs(tile[0] - x) == 1 and tile[1] - y == 0) or (abs(tile[1] - y) == 1 and tile[0] - x == 0):
         return True
     return False
 
