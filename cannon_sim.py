@@ -133,8 +133,7 @@ class SimpleWalkabilityStrategy(WalkabilityStrategy):
           return True
         if direction[0] != 0 and direction[1] != 0:
           # If trying to go diagonally, check both components
-          # This is probably worth precomputing with flags
-          # TODO: Hate that this is recursive, even if these are all definitely base cases
+          # TODO: Hate that this is circular, even if these are all definitely base cases
           if self.is_walkable_tile((old_x, old_y), (old_x + direction[0], old_y), moving_npc) is False:
             return True
           if self.is_walkable_tile((old_x + direction[0], old_y), (new_x, new_y), moving_npc) is False:
@@ -236,7 +235,7 @@ class NpcRegistry:
     if npc_id in self.GUARD_IDS:
       return {'id': npc_id, 'max_range': 4, 'wander_range': 2, 'hitpoints': 22, 'combat_level': 10, 'name': 'Guard'}
     if npc_id in self.SKELETON_IDS:
-      return {'id': npc_id,  'max_range': 10, 'wander_range': 8, 'hitpoints': 29, 'combat_level': 22, 'name': 'Skeleton'}
+      return {'id': npc_id, 'respawn_time': 70, 'max_range': 10, 'wander_range': 8, 'hitpoints': 29, 'combat_level': 22, 'name': 'Skeleton'}
     return {'id': npc_id, 'combat_level': 0 }
 
   def _add_to_tile(self, npc, tile_x, tile_y):
@@ -760,7 +759,7 @@ class Cannon:
       self.queue_damage(npc)
 
   def queue_damage(self, npc: Npc):
-    damage = random.randint(0, 25)
+    damage = random.randint(0, 30)
     npc.add_to_queue(DamageAction(damage, self.player))
   
   def get_target(self):
@@ -790,7 +789,7 @@ class Player:
     # but it isn't essential to this sim since players can't move
     self.in_combat_with = None
     self.time_to_next_attack = 0
-    self.attack_speed = 4
+    self.attack_speed = 5
 
     # TODO: This feels hacky
     self.map_registry = cannon_strategy.map_registry
@@ -823,7 +822,7 @@ class Player:
     # This simulation does not care about player hp
     if not self.is_in_combat():
       self.in_combat_with = attacker
-      self.time_to_next_attack = self.attack_speed // 2
+      self.time_to_next_attack = max(self.attack_speed // 2, self.time_to_next_attack)
 
   def place_cannon(self, coordinate: Tuple[int, int]):
     self._cannon = Cannon(coordinate[0], coordinate[1], self, self._cannon_strategy)
@@ -862,7 +861,8 @@ class Player:
     self.queue.append(action)
 
   def queue_damage(self, npc: Npc):
-    damage = random.randint(0, 40)
+    # TODO: THIS IS FANG DAMAGE RANGE
+    damage = random.randint(5, 30)
     npc.add_to_queue(DamageAction(damage, self))
 
 class MapRegistry:
@@ -876,16 +876,15 @@ class MapRegistry:
     # TODO: Implement method
     return False
 
-if __name__ == '__main__':
-  c = (3373, 9747)
+c = (3378, 9749)
+map_config = create_map_config(c)
+map_registry = MapRegistry(map_config)
+def run_engine():
   npc_registry = NpcRegistry()
   player_registry = PlayerRegistry()
-  map_config = create_map_config(c)
-  map_registry = MapRegistry(map_config)
 
   # Populate npc_registry
   npc_structs = relevant_npcs(c)
-  npcs = []
   strategy = SimpleWalkabilityStrategy(map_registry, npc_registry, player_registry)
   hunt_strategy = SimpleHuntStrategy(map_registry, npc_registry, player_registry)
   for s in npc_structs:
@@ -894,22 +893,31 @@ if __name__ == '__main__':
 
   # Populate player_registry
   player = player_registry.create_player(c, CannonHuntStrategy(map_registry, npc_registry, player_registry))
-  player.place_cannon((3378, 9746))
+  player.place_cannon((3379, 9746))
 
   # Create and run engine
-  import time
+  # import time
   engine = Engine(map_registry, npc_registry, player_registry)
-  start_time = time.time()
-  print('Starting the ticks...')
+  # start_time = time.time()
+  # print('Starting the ticks...')
   ticks_to_run = 6000
   engine.perform_ticks(ticks_to_run)
-  print('Done with the ticks... ' + str(time.time() - start_time))
+  # print('Done with the ticks... ' + str(time.time() - start_time))
 
   # KC stats
   total_deaths = 0
   for npc in npc_registry.registered_npcs:
     if npc.times_died > 0:
-      print(f'{npc.name} died {npc.times_died} times')
+      # print(f'{npc.name} died {npc.times_died} times')
       total_deaths += npc.times_died
-  print(f'Total kills: {total_deaths}')
-  print(f'Total kills per hour: {total_deaths/(ticks_to_run/6000):.2f}')
+  # print(f'Total kills: {total_deaths}')
+  # print(f'Total kills per hour: {total_deaths/(ticks_to_run/6000):.2f}')
+  return total_deaths
+
+if __name__ == '__main__':
+  
+  results = []
+  for i in range(10):
+    print(f'Starting run {i}...')
+    results.append(run_engine())
+  print(results)
