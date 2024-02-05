@@ -502,6 +502,9 @@ class Npc:
     east_tile_distance = cheb(east_tile, self.coordinate)
     west_tile_distance = cheb(west_tile, self.coordinate)
     
+    # TODO: This might not be true for 2x2 and larger
+    # https://youtu.be/qnw3kGlpiuQ?si=iqtx3irGcabn_PF7&t=1356 seems to show pathing to N tile
+    # Can't be going to W tile because otherwise it would just move down.
     min_dist = min(north_tile_distance, south_tile_distance, east_tile_distance, west_tile_distance)
     # Order of checks here is important since an Npc on the NE/NW tile will path to the N tile and SE/SW paths S
     if min_dist == north_tile_distance:
@@ -896,13 +899,9 @@ def run_engine():
   player.place_cannon((3379, 9746))
 
   # Create and run engine
-  # import time
   engine = Engine(map_registry, npc_registry, player_registry)
-  # start_time = time.time()
-  # print('Starting the ticks...')
   ticks_to_run = 6000
   engine.perform_ticks(ticks_to_run)
-  # print('Done with the ticks... ' + str(time.time() - start_time))
 
   # KC stats
   total_deaths = 0
@@ -910,14 +909,12 @@ def run_engine():
     if npc.times_died > 0:
       # print(f'{npc.name} died {npc.times_died} times')
       total_deaths += npc.times_died
-  # print(f'Total kills: {total_deaths}')
-  # print(f'Total kills per hour: {total_deaths/(ticks_to_run/6000):.2f}')
   return total_deaths
 
 if __name__ == '__main__':
   
   results = []
-  for i in range(10):
+  for i in range(1000):
     print(f'Starting run {i}...')
     results.append(run_engine())
   print(results)
